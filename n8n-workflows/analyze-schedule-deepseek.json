@@ -58,22 +58,20 @@
       "parameters": {
         "method": "POST",
         "url": "https://api.deepseek.com/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Content-Type",
               "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "value": "={{ 'Bearer ' + $env.DEEPSEEK_API_KEY }}"
             }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"deepseek-chat\",\n  \"temperature\": 0.2,\n  \"messages\": [\n    { \"role\": \"system\", \"content\": \"Ты опытный инженер-планировщик. Отвечай конкретно, на русском языке, без воды.\" },\n    { \"role\": \"user\", \"content\": $json.prompt }\n  ]\n}"
+        "jsonBody": "={{ JSON.stringify({ model: 'deepseek-chat', temperature: 0.2, messages: [{ role: 'system', content: 'Ты опытный инженер-планировщик. Отвечай конкретно, на русском языке, без воды.' }, { role: 'user', content: $json.prompt }] }) }}"
       },
       "id": "http-deepseek",
       "name": "DeepSeek API",
