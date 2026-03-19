@@ -125,9 +125,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Нет данных задач для анализа.' }, { status: 400 });
     }
 
-    const tasksToSend = tasks.slice(0, 200);
+    // Меньше задач = меньше промпт = меньше риск таймаутов на n8n/DeepSeek.
+    const tasksToSend = tasks.slice(0, 120);
     const n8nUrls = resolveN8nAnalyzeWebhookUrls();
     let n8nFailure: string | undefined;
+    let n8nTimedOut = false;
 
     if (n8nUrls.length > 0) {
       const controller = new AbortController();
@@ -173,7 +175,8 @@ export async function POST(req: Request) {
           } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error';
             if (message.toLowerCase().includes('aborted')) {
-              n8nFailure = 'n8n timeout (45s).';
+              n8nTimedOut = true;
+              n8nFailure = 'n8n timeout (20s).';
               break;
             }
             n8nFailure = `n8n request failed: ${message}`;
@@ -186,6 +189,15 @@ export async function POST(req: Request) {
       } finally {
         clearTimeout(timeout);
       }
+    }
+
+    // Если n8n отвалился по таймауту — лучше вернуть контролируемую ошибку,
+    // чем ждать ещё и DeepSeek (это снова приведёт к "Load failed").
+    if (n8nTimedOut) {
+      return NextResponse.json(
+        { error: 'n8n timeout (20s).' },
+        { status: 504 }
+      );
     }
 
     const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -201,7 +213,7 @@ export async function POST(req: Request) {
     try {
       // Чтобы не получать "Load failed" в браузере из-за длительного ожидания ответа.
       const deepseekController = new AbortController();
-      const deepseekTimeout = setTimeout(() => deepseekController.abort(), 20000);
+      const deepseekTimeout = setTimeout(() => deepseekController.abort(), 12000);
       resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -227,7 +239,7 @@ export async function POST(req: Request) {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       if (message.toLowerCase().includes('aborted')) {
-        return NextResponse.json({ error: 'DeepSeek timeout (35s).' }, { status: 504 });
+        return NextResponse.json({ error: 'DeepSeek timeout (12s).' }, { status: 504 });
       }
       return NextResponse.json({ error: `DeepSeek fetch failed: ${message}` }, { status: 502 });
     }
