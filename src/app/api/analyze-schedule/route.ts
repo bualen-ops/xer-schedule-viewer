@@ -197,6 +197,9 @@ export async function POST(req: Request) {
     const prompt = buildPrompt(tasksToSend);
     let resp: Response;
     try {
+      // Чтобы не получать "Load failed" в браузере из-за длительного ожидания ответа.
+      const deepseekController = new AbortController();
+      const deepseekTimeout = setTimeout(() => deepseekController.abort(), 35000);
       resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -216,9 +219,14 @@ export async function POST(req: Request) {
           ],
         }),
         cache: 'no-store',
+        signal: deepseekController.signal,
       });
+      clearTimeout(deepseekTimeout);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
+      if (message.toLowerCase().includes('aborted')) {
+        return NextResponse.json({ error: 'DeepSeek timeout (35s).' }, { status: 504 });
+      }
       return NextResponse.json({ error: `DeepSeek fetch failed: ${message}` }, { status: 502 });
     }
 
