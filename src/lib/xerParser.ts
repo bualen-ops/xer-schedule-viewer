@@ -22,6 +22,7 @@ export type XerTask = {
   start: string; // ISO date
   end: string;
   progress: number; // 0–100
+  isCritical?: boolean;
   status_code?: string;
   wbs_id?: string;
 };
@@ -58,6 +59,16 @@ function parseDate(s: string): string | null {
 function parsePct(s: string): number {
   const n = parseFloat(String(s).replace(',', '.'));
   return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
+}
+
+function parseCritical(
+  drivingPathValue: string | undefined,
+  totalFloatValue: string | undefined
+): boolean {
+  const driving = String(drivingPathValue ?? '').trim().toUpperCase();
+  if (driving === 'Y' || driving === '1' || driving === 'TRUE') return true;
+  const totalFloat = parseFloat(String(totalFloatValue ?? '').replace(',', '.'));
+  return Number.isFinite(totalFloat) ? totalFloat <= 0 : false;
 }
 
 export function parseXer(content: string): XerSchedule {
@@ -136,8 +147,11 @@ export function parseXer(content: string): XerSchedule {
         const target_start = parseDate(row[taskCols.target_start_date]);
         const target_end = parseDate(row[taskCols.target_end_date]);
         const progress = parsePct(row[taskCols.phys_complete_pct]);
+        const driving_path_flag = taskCols.driving_path_flag !== undefined ? row[taskCols.driving_path_flag] : undefined;
+        const total_float_hr_cnt = taskCols.total_float_hr_cnt !== undefined ? row[taskCols.total_float_hr_cnt] : undefined;
         const status_code = row[taskCols.status_code];
         const wbs_id = row[taskCols.wbs_id];
+        const isCritical = parseCritical(driving_path_flag, total_float_hr_cnt);
 
         const start = early_start || target_start;
         const end = early_end || target_end;
@@ -149,6 +163,7 @@ export function parseXer(content: string): XerSchedule {
             start,
             end,
             progress,
+            isCritical,
             status_code,
             wbs_id: wbs_id != null ? String(wbs_id).trim() : undefined,
           });

@@ -148,22 +148,31 @@ const INDENT_PX = 20;
 function GanttTaskRow({
   t,
   level,
+  rowNum,
   leftPct,
   widthPct,
+  isCritical,
 }: {
   t: XerTask;
   level: number;
+  rowNum: number;
   leftPct: number;
   widthPct: number;
+  isCritical: boolean;
 }) {
   const duration = daysBetween(t.start, t.end);
+  const barClass = isCritical ? 'bg-red-500/90' : 'bg-sky-500/80';
+  const barProgressClass = isCritical ? 'bg-red-600/70' : 'bg-sky-600/60';
   return (
     <div className="flex border-b border-slate-100 py-1 text-sm hover:bg-slate-50">
+      <div className="w-10 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 tabular-nums text-xs">
+        {rowNum}
+      </div>
       <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 font-medium text-slate-800" title={t.task_code} style={{ paddingLeft: 8 + level * INDENT_PX }}>
         {t.task_code || '—'}
       </div>
       <div className="w-48 flex-shrink-0 border-r border-slate-100 px-2 py-1" style={{ paddingLeft: 8 + level * INDENT_PX }}>
-        <div className="truncate text-slate-700" title={t.task_name}>{t.task_name || '—'}</div>
+        <div className={`truncate ${isCritical ? 'text-red-700 font-semibold' : 'text-slate-700'}`} title={t.task_name}>{t.task_name || '—'}</div>
       </div>
       <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 tabular-nums">
         {formatDate(t.start)}
@@ -174,19 +183,19 @@ function GanttTaskRow({
       <div className="w-16 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 tabular-nums" title={`${duration} дн.`}>
         {duration} д.
       </div>
-      <div className="relative flex-1 py-1 pr-4" style={{ minHeight: 28 }}>
+      <div className="relative w-full max-w-[520px] flex-shrink-0 py-1 pr-4" style={{ minHeight: 28 }}>
         <div
-          className="absolute top-1 h-5 rounded bg-sky-500/80"
+          className={`absolute top-1 h-5 rounded ${barClass}`}
           style={{
             left: `${leftPct}%`,
             width: `${widthPct}%`,
             minWidth: 4,
           }}
-          title={`${t.start} — ${t.end} · ${t.progress}%`}
+          title={`${t.start} — ${t.end} · ${t.progress}%${isCritical ? ' · Критический путь' : ''}`}
         >
           {t.progress > 0 && (
             <div
-              className="h-full rounded bg-sky-600/60"
+              className={`h-full rounded ${barProgressClass}`}
               style={{ width: `${t.progress}%` }}
             />
           )}
@@ -199,6 +208,7 @@ function GanttTaskRow({
 function GanttWbsRow({
   wbs,
   level,
+  rowNum,
   hasChildren,
   expanded,
   onToggle,
@@ -209,6 +219,7 @@ function GanttWbsRow({
 }: {
   wbs: XerWbsNode;
   level: number;
+  rowNum: number;
   hasChildren: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -219,6 +230,9 @@ function GanttWbsRow({
 }) {
   return (
     <div className="flex border-b border-slate-200 bg-slate-50/80 py-1 text-sm font-medium hover:bg-slate-100">
+      <div className="w-10 flex-shrink-0 border-r border-slate-100 py-1 text-slate-500 tabular-nums text-xs">
+        {rowNum}
+      </div>
       <div className="w-24 flex-shrink-0 border-r border-slate-100 py-1" style={{ paddingLeft: 8 + level * INDENT_PX }}>
         {hasChildren ? (
           <button
@@ -246,7 +260,7 @@ function GanttWbsRow({
       <div className="w-16 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 tabular-nums text-xs">
         {spanStart && spanEnd ? `${daysBetween(spanStart, spanEnd)} д.` : '—'}
       </div>
-      <div className="relative flex-1 py-1 pr-4" style={{ minHeight: 28 }}>
+      <div className="relative w-full max-w-[520px] flex-shrink-0 py-1 pr-4" style={{ minHeight: 28 }}>
         {spanStart && spanEnd && (
           <div
             className="absolute top-1 h-5 rounded bg-slate-400/50"
@@ -318,12 +332,13 @@ function GanttChart({ schedule }: { schedule: XerSchedule }) {
     <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
       <div className="min-w-[960px]">
         <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-600">
+          <div className="w-10 flex-shrink-0 border-r border-slate-200 px-2 py-2">№</div>
           <div className="w-24 flex-shrink-0 border-r border-slate-200 px-3 py-2">Код</div>
           <div className="w-48 flex-shrink-0 border-r border-slate-200 px-3 py-2">Название</div>
           <div className="w-24 flex-shrink-0 border-r border-slate-200 px-3 py-2">Начало</div>
           <div className="w-24 flex-shrink-0 border-r border-slate-200 px-3 py-2">Окончание</div>
           <div className="w-16 flex-shrink-0 border-r border-slate-200 px-3 py-2" title="Длительность (дней)">Длит.</div>
-          <div className="flex-1 py-2 pr-4">
+          <div className="w-full max-w-[520px] flex-shrink-0 py-2 pr-4">
             <div className="relative h-6">
               {timelineLabels.map((d, i) => {
                 const x = leftPct(d.toISOString().slice(0, 10));
@@ -346,6 +361,7 @@ function GanttChart({ schedule }: { schedule: XerSchedule }) {
               key={`wbs-${row.wbs.id}`}
               wbs={row.wbs}
               level={row.level}
+              rowNum={idx + 1}
               hasChildren={row.hasChildren}
               expanded={expandedIds.has(row.wbs.id)}
               onToggle={() => toggleWbs(row.wbs.id)}
@@ -359,8 +375,10 @@ function GanttChart({ schedule }: { schedule: XerSchedule }) {
               key={`task-${row.task.id}`}
               t={row.task}
               level={row.level}
+              rowNum={idx + 1}
               leftPct={leftPct(row.task.start)}
               widthPct={widthPct(row.task.start, row.task.end)}
+              isCritical={row.task.isCritical ?? false}
             />
           )
         )}
