@@ -130,25 +130,31 @@ export async function POST(req: Request) {
     }
 
     const prompt = buildPrompt(tasksToSend);
-    const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        temperature: 0.2,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'Ты опытный инженер-планировщик. Отвечай конкретно, на русском языке, без воды.',
-          },
-          { role: 'user', content: prompt },
-        ],
-      }),
-    });
+    let resp: Response;
+    try {
+      resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          temperature: 0.2,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Ты опытный инженер-планировщик. Отвечай конкретно, на русском языке, без воды.',
+            },
+            { role: 'user', content: prompt },
+          ],
+        }),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return NextResponse.json({ error: `DeepSeek fetch failed: ${message}` }, { status: 502 });
+    }
 
     const respText = await resp.text();
 
