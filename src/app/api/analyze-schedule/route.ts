@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 
+/** Всегда Node + свежие env на Vercel; иначе иногда «теряется» прокси до n8n. */
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 type AnalyzeTask = {
   id: string;
   task_code: string;
@@ -16,15 +20,33 @@ type AnalyzeRequest = {
   tasks?: AnalyzeTask[];
 };
 
-/** Webhook URL for n8n; server-side env is reliable on Vercel after redeploy. */
-function resolveN8nAnalyzeWebhookUrl(): string | undefined {
-  const raw =
-    (process.env.N8N_ANALYZE_WEBHOOK_URL?.trim() || '') ||
-    (process.env.NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL?.trim() || '');
-  if (!raw) return undefined;
-  const url = raw.replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(url)) return undefined;
-  return url;
+function parseWebhookUrlList(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  return raw
+    .split(/[\n,]+/)
+    .map((s) => s.trim().replace(/\/+$/, ''))
+    .filter((u) => /^https?:\/\//i.test(u));
+}
+
+/** Один или несколько Production URL webhook (через запятую или перенос строки). */
+function resolveN8nAnalyzeWebhookUrls(): string[] {
+  const primary = parseWebhookUrlList(process.env.N8N_ANALYZE_WEBHOOK_URL);
+  if (primary.length) return primary;
+  return parseWebhookUrlList(process.env.NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL);
+}
+
+/** Заголовок Authorization к вашему n8n (если webhook за прокси с проверкой). Значение целиком, напр. Bearer xxx или Basic xxx */
+function buildN8nOutboundHeaders(): HeadersInit {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'User-Agent': 'xer-schedule-viewer/1.0',
+  };
+  const auth = process.env.N8N_ANALYZE_WEBHOOK_AUTH?.trim();
+  if (auth) {
+    headers.Authorization = auth;
+  }
+  return headers;
 }
 
 function buildPrompt(tasks: AnalyzeTask[]): string {
@@ -59,20 +81,28 @@ function buildPrompt(tasks: AnalyzeTask[]): string {
   ].join('\n');
 }
 
+/** Проверка, видит ли деплой URL n8n (без раскрытия адреса). */
+export async function GET() {
+  const urls = resolveN8nAnalyzeWebhookUrls();
+  return NextResponse.json({
+    ok: true,
+    n8nWebhookConfigured: urls.length > 0,
+    n8nWebhookUrlCount: urls.length,
+    hint:
+      urls.length === 0
+        ? 'Задайте N8N_ANALYZE_WEBHOOK_URL (Production) в Vercel и сделайте Redeploy. Проверка: POST /api/analyze-schedule с телом { "tasks": [...] }.'
+        : 'Webhook URL задан; при анализе на сайте запрос уходит на n8n первым.',
+  });
+}
+
 export async function POST(req: Request) {
   try {
-    // Вместо req.json() используем req.text() + JSON.parse.
-    // На prod Vercel у нас сейчас req.json() возвращает 502 с сообщением про JSON,
-    // хотя клиент отправляет корректное application/json.
     const raw = await req.text();
     let body: AnalyzeRequest = {};
     try {
       body = raw ? (JSON.parse(raw) as AnalyzeRequest) : {};
     } catch {
-      return NextResponse.json(
-        { error: 'Invalid JSON body' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
     const tasks = Array.isArray(body.tasks) ? body.tasks : [];
     if (tasks.length === 0) {
@@ -80,51 +110,60 @@ export async function POST(req: Request) {
     }
 
     const tasksToSend = tasks.slice(0, 200);
-
-    // Если настроен n8n, проксируем запрос туда (и возвращаем результат обратно в сайт).
-    // Предпочтительно N8N_ANALYZE_WEBHOOK_URL (читается на сервере в runtime на Vercel).
-    // NEXT_PUBLIC_* может подставляться на этапе сборки — после смены значения нужен Redeploy.
-    const n8nUrl = resolveN8nAnalyzeWebhookUrl();
+    const n8nUrls = resolveN8nAnalyzeWebhookUrls();
     let n8nFailure: string | undefined;
-    if (n8nUrl) {
+
+    if (n8nUrls.length > 0) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 45000);
+      const payload = JSON.stringify({ tasks: tasksToSend });
+      const headers = buildN8nOutboundHeaders();
+
       try {
-        const resp = await fetch(n8nUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tasks: tasksToSend }),
-          signal: controller.signal,
-        });
-
-        const text = await resp.text();
-        let data: { analysis?: string; error?: string };
-        try {
-          data = text ? (JSON.parse(text) as { analysis?: string; error?: string }) : {};
-        } catch {
-          n8nFailure = `n8n returned non-JSON (HTTP ${resp.status}). Preview: ${text.slice(0, 200)}`;
-          // fallback to DeepSeek below
-          data = {};
-        }
-
-        if (resp.ok) {
-          const analysis = data.analysis;
-          if (analysis) {
-            return NextResponse.json({
-              analysis,
-              source: 'n8n',
+        for (let i = 0; i < n8nUrls.length; i++) {
+          const n8nUrl = n8nUrls[i];
+          try {
+            const resp = await fetch(n8nUrl, {
+              method: 'POST',
+              headers,
+              body: payload,
+              signal: controller.signal,
+              cache: 'no-store',
+              redirect: 'follow',
             });
+
+            const text = await resp.text();
+            let data: { analysis?: string; error?: string };
+            try {
+              data = text ? (JSON.parse(text) as { analysis?: string; error?: string }) : {};
+            } catch {
+              n8nFailure = `n8n returned non-JSON (HTTP ${resp.status}). Preview: ${text.slice(0, 200)}`;
+              data = {};
+            }
+
+            if (resp.ok) {
+              const analysis = data.analysis;
+              if (analysis) {
+                const res = NextResponse.json({ analysis, source: 'n8n' });
+                res.headers.set('X-Analyze-Source', 'n8n');
+                return res;
+              }
+              n8nFailure = data.error || 'n8n returned empty analysis.';
+            } else {
+              n8nFailure = data.error || `n8n error (HTTP ${resp.status}).`;
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            if (message.toLowerCase().includes('aborted')) {
+              n8nFailure = 'n8n timeout (45s).';
+              break;
+            }
+            n8nFailure = `n8n request failed: ${message}`;
           }
-          n8nFailure = data.error || 'n8n returned empty analysis.';
-        } else {
-          n8nFailure = data.error || `n8n error (HTTP ${resp.status}).`;
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        if (message.toLowerCase().includes('aborted')) {
-          n8nFailure = 'n8n timeout (45s).';
-        } else {
-          n8nFailure = `n8n request failed: ${message}`;
+
+          if (i < n8nUrls.length - 1) {
+            n8nFailure = `${n8nFailure || 'failed'} (пробуем следующий URL…)`;
+          }
         }
       } finally {
         clearTimeout(timeout);
@@ -160,6 +199,7 @@ export async function POST(req: Request) {
             { role: 'user', content: prompt },
           ],
         }),
+        cache: 'no-store',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -190,20 +230,21 @@ export async function POST(req: Request) {
     }
 
     const n8nNote =
-      n8nUrl && n8nFailure
+      n8nUrls.length > 0 && n8nFailure
         ? `Запрос в n8n не дал анализ: ${n8nFailure} Использован запасной вызов DeepSeek.`
-        : !n8nUrl
-          ? 'Запрос не отправлялся в n8n: не задан URL webhook на сервере. В Vercel → Settings → Environment Variables для окружения Production добавьте N8N_ANALYZE_WEBHOOK_URL (полный Production URL узла Webhook в n8n) и выполните Redeploy. Альтернатива: NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL — тоже только после Redeploy.'
+        : n8nUrls.length === 0
+          ? 'Запрос не отправлялся в n8n: не задан URL webhook на сервере. В Vercel → Environment Variables → Production: N8N_ANALYZE_WEBHOOK_URL (полный Production URL Webhook), затем Redeploy. Проверка: откройте GET /api/analyze-schedule — должно быть n8nWebhookConfigured: true.'
           : undefined;
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       analysis,
       source: 'deepseek',
       ...(n8nNote ? { n8nNote } : {}),
     });
+    res.headers.set('X-Analyze-Source', 'deepseek');
+    return res;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Неизвестная ошибка';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

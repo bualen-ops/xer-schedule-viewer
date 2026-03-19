@@ -578,6 +578,11 @@ export default function Home() {
                 {aiDebug.bodyPreview && (
                   <p className="break-all">Ответ (начало): {aiDebug.bodyPreview}</p>
                 )}
+                <p className="text-slate-500">
+                  Проверка n8n на сервере: откройте в новой вкладке{' '}
+                  <span className="text-sky-700">/api/analyze-schedule</span> — в JSON должно быть{' '}
+                  <code>n8nWebhookConfigured: true</code>.
+                </p>
               </div>
             </details>
           )}
