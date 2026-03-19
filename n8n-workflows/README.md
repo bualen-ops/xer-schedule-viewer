@@ -7,10 +7,13 @@
 1. **Импорт workflow**
    - В n8n: Workflows → Import from File → выберите `analyze-schedule-deepseek.json`.
 
-2. **Ключ DeepSeek**
-   - **Проще всего:** откройте узел **DeepSeek API** → в заголовках найдите **Authorization** и замените значение `Bearer PASTE_YOUR_DEEPSEEK_KEY_HERE` на **`Bearer sk-ваш-реальный-ключ`** (слово `Bearer` и пробел обязательны).
-   - **Безопаснее для команды:** вместо ключа в узле используйте **Credentials → Header Auth** и подключите credential к узлу (тогда удалите строку Authorization из заголовков узла, чтобы не дублировать).
-   - Не коммитьте workflow с реальным ключом в Git.
+2. **Учётные данные DeepSeek (обязательно)**
+   - В n8n: **Credentials** → Add → **Header Auth**.
+   - Имя: **`DeepSeek API Key`** (как в workflow — так проще выбрать узел).
+   - **Header Name:** `Authorization`
+   - **Header Value:** `Bearer sk-ваш-ключ-deepseek` (полная строка с `Bearer `).
+   - Откройте узел **DeepSeek API** → в поле **Credential** выберите созданный **DeepSeek API Key**.
+   - Не полагайтесь на `$env.DEEPSEEK_API_KEY` в n8n 2.11 — в выражениях окружение часто недоступно; credential надёжнее.
 
 3. **Активация и URL webhook**
    - Сохраните workflow и нажмите **Activate**.

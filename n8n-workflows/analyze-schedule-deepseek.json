@@ -58,16 +58,14 @@
       "parameters": {
         "method": "POST",
         "url": "https://api.deepseek.com/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Content-Type",
               "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "value": "Bearer PASTE_YOUR_DEEPSEEK_KEY_HERE"
             }
           ]
         },
