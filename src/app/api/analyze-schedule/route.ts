@@ -125,8 +125,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Нет данных задач для анализа.' }, { status: 400 });
     }
 
-    // Меньше задач = меньше промпт = меньше риск таймаутов на n8n/DeepSeek.
-    const tasksToSend = tasks.slice(0, 120);
+    // Чтобы n8n/DeepSeek возвращали ответ быстрее (и не получали "Load failed"),
+    // уменьшаем размер входных данных:
+    // - ограничиваем количество задач
+    // - подрезаем длинные поля текста (task_name/resources/wbs_id)
+    const capTasks = 80;
+    const tasksToSend = tasks.slice(0, capTasks).map((t) => ({
+      id: t.id,
+      task_code: t.task_code,
+      task_name: typeof t.task_name === 'string' ? t.task_name.slice(0, 120) : '',
+      start: t.start,
+      end: t.end,
+      progress: t.progress,
+      isCritical: t.isCritical,
+      resources: typeof t.resources === 'string' ? t.resources.slice(0, 200) : t.resources,
+      wbs_id: typeof t.wbs_id === 'string' ? t.wbs_id.slice(0, 80) : t.wbs_id,
+    }));
     const n8nUrls = resolveN8nAnalyzeWebhookUrls();
     let n8nFailure: string | undefined;
     let n8nTimedOut = false;
@@ -196,6 +210,15 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: 'n8n timeout (20s).' },
         { status: 504 }
+      );
+    }
+
+    // Если n8n URL задан, но анализ не получился — лучше вернуть ошибку сразу,
+    // чем снова ждать DeepSeek и снова ловить "Load failed" на клиенте.
+    if (n8nUrls.length > 0) {
+      return NextResponse.json(
+        { error: n8nFailure || 'n8n returned empty analysis.' },
+        { status: 502 }
       );
     }
 
