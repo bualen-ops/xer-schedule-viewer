@@ -4,7 +4,8 @@ import { useCallback, useMemo, useState } from 'react';
 import { parseXer, type XerSchedule, type XerTask, type XerWbsNode } from '@/lib/xerParser';
 
 const DISPLAY_LIMIT = 500;
-const MAX_TIMELINE_LABELS = 14;
+/** Подписей дат не больше 8, чтобы не налезали в узкой области графика (520px) */
+const MAX_TIMELINE_LABELS = 8;
 
 type GanttRowItem =
   | { type: 'wbs'; wbs: XerWbsNode; level: number; hasChildren: boolean; spanStart?: string; spanEnd?: string }
@@ -172,7 +173,7 @@ function GanttTaskRow({
       <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 font-medium text-slate-800" title={t.task_code} style={{ paddingLeft: 8 + level * INDENT_PX }}>
         {t.task_code || '—'}
       </div>
-      <div className="w-72 flex-shrink-0 border-r border-slate-100 px-2 py-1" style={{ paddingLeft: 8 + level * INDENT_PX }}>
+      <div className="min-w-[280px] w-80 flex-shrink-0 border-r border-slate-100 px-2 py-1" style={{ paddingLeft: 8 + level * INDENT_PX }}>
         <div className={`truncate ${isCritical ? 'text-red-700 font-semibold' : 'text-slate-700'}`} title={t.task_name}>{t.task_name || '—'}</div>
       </div>
       <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 tabular-nums">
@@ -184,7 +185,7 @@ function GanttTaskRow({
       <div className="w-16 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 tabular-nums" title={`${duration} дн.`}>
         {duration} д.
       </div>
-      <div className="w-28 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 text-xs" style={{ paddingLeft: 8 + level * INDENT_PX }}>
+      <div className="min-w-[140px] w-40 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 text-xs" style={{ paddingLeft: 8 + level * INDENT_PX }}>
         <div className="truncate" title={t.resources ?? ''}>{t.resources || '—'}</div>
       </div>
       <div className="w-14 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 tabular-nums text-xs">
@@ -255,7 +256,7 @@ function GanttWbsRow({
           <span className="inline-block h-5 w-5" />
         )}
       </div>
-      <div className="w-72 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-800" style={{ paddingLeft: level * INDENT_PX }}>
+      <div className="min-w-[280px] w-80 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-800" style={{ paddingLeft: level * INDENT_PX }}>
         <div className="truncate" title={wbs.wbs_name}>{wbs.wbs_name || '—'}</div>
       </div>
       <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 tabular-nums text-xs">
@@ -267,7 +268,7 @@ function GanttWbsRow({
       <div className="w-16 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 tabular-nums text-xs">
         {spanStart && spanEnd ? `${daysBetween(spanStart, spanEnd)} д.` : '—'}
       </div>
-      <div className="w-28 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 text-xs">
+      <div className="min-w-[140px] w-40 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 text-xs">
         —
       </div>
       <div className="w-14 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 text-xs">
@@ -332,26 +333,26 @@ function GanttChart({ schedule }: { schedule: XerSchedule }) {
   }, []);
 
   const timelineLabels = useMemo(() => {
-    const count = Math.min(MAX_TIMELINE_LABELS, Math.ceil(totalDays / 7) + 1);
-    const step = Math.max(1, Math.floor((Math.ceil(totalDays / 7) + 1) / count));
+    const count = Math.min(MAX_TIMELINE_LABELS, Math.max(2, Math.ceil(totalDays / 14)));
+    const stepDays = totalDays / (count - 1);
     return Array.from({ length: count }, (_, i) => {
       const d = new Date(minDate);
-      d.setDate(d.getDate() + i * step * 7);
+      d.setDate(d.getDate() + Math.round(i * stepDays));
       return d;
     });
   }, [minDate, totalDays]);
 
   return (
     <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
-      <div className="min-w-[1120px]">
+      <div className="min-w-[1280px]">
         <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-600">
           <div className="w-10 flex-shrink-0 border-r border-slate-200 px-2 py-2">№</div>
           <div className="w-24 flex-shrink-0 border-r border-slate-200 px-3 py-2">Код</div>
-          <div className="w-72 flex-shrink-0 border-r border-slate-200 px-3 py-2">Название</div>
+          <div className="min-w-[280px] w-80 flex-shrink-0 border-r border-slate-200 px-3 py-2">Название</div>
           <div className="w-24 flex-shrink-0 border-r border-slate-200 px-3 py-2">Начало</div>
           <div className="w-24 flex-shrink-0 border-r border-slate-200 px-3 py-2">Окончание</div>
           <div className="w-16 flex-shrink-0 border-r border-slate-200 px-3 py-2" title="Длительность (дней)">Длит.</div>
-          <div className="w-28 flex-shrink-0 border-r border-slate-200 px-2 py-2">Ресурсы</div>
+          <div className="min-w-[140px] w-40 flex-shrink-0 border-r border-slate-200 px-2 py-2">Ресурсы</div>
           <div className="w-14 flex-shrink-0 border-r border-slate-200 px-2 py-2" title="Процент завершения">% зав.</div>
           <div className="w-full max-w-[520px] flex-shrink-0 py-2 pr-4">
             <div className="relative h-6">
@@ -457,22 +458,36 @@ export default function Home() {
       setAiError('Сначала загрузите файл XER.');
       return;
     }
+    setAiLoading(true);
+    setAiError(null);
+    setAiAnalysis(null);
     try {
-      setAiLoading(true);
-      setAiError(null);
-      setAiAnalysis(null);
       const response = await fetch('/api/analyze-schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tasks: schedule.tasks }),
       });
-      const data = (await response.json()) as { analysis?: string; error?: string };
+      const text = await response.text();
+      let data: { analysis?: string; error?: string };
+      try {
+        data = text ? (JSON.parse(text) as { analysis?: string; error?: string }) : {};
+      } catch {
+        setAiError(response.ok ? 'Неверный ответ сервера.' : `Ошибка сервера (${response.status}). Попробуйте позже.`);
+        return;
+      }
       if (!response.ok) {
-        throw new Error(data.error || 'Ошибка анализа графика');
+        setAiError(data.error || `Ошибка анализа (${response.status}). Проверьте DEEPSEEK_API_KEY в настройках Vercel.`);
+        return;
       }
       setAiAnalysis(data.analysis || 'Пустой ответ от ИИ.');
     } catch (err) {
-      setAiError(err instanceof Error ? err.message : 'Ошибка при анализе графика');
+      setAiError(
+        err instanceof Error && err.message === 'Failed to fetch'
+          ? 'Сеть недоступна или таймаут. Проверьте интернет и повторите.'
+          : err instanceof Error
+            ? err.message
+            : 'Ошибка при анализе графика.'
+      );
     } finally {
       setAiLoading(false);
     }
