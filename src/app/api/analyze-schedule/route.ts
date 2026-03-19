@@ -158,17 +158,24 @@ export async function POST(req: Request) {
       }),
     });
 
+    const respText = await resp.text();
+
     if (!resp.ok) {
-      const errText = await resp.text();
       return NextResponse.json(
-        { error: `DeepSeek API error: ${resp.status} ${errText}` },
+        { error: `DeepSeek API error: HTTP ${resp.status}. Body (preview): ${respText.slice(0, 500)}` },
         { status: 502 }
       );
     }
 
-    const data = (await resp.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
+    let data: { choices?: Array<{ message?: { content?: string } }> };
+    try {
+      data = respText ? (JSON.parse(respText) as typeof data) : {};
+    } catch {
+      return NextResponse.json(
+        { error: `DeepSeek returned invalid JSON. Body (preview): ${respText.slice(0, 500)}` },
+        { status: 502 }
+      );
+    }
     const analysis = data.choices?.[0]?.message?.content?.trim();
     if (!analysis) {
       return NextResponse.json({ error: 'DeepSeek вернул пустой ответ.' }, { status: 502 });
