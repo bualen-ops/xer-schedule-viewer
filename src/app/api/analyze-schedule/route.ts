@@ -213,15 +213,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Если n8n URL задан, но анализ не получился — лучше вернуть ошибку сразу,
-    // чем снова ждать DeepSeek и снова ловить "Load failed" на клиенте.
-    if (n8nUrls.length > 0) {
-      return NextResponse.json(
-        { error: n8nFailure || 'n8n returned empty analysis.' },
-        { status: 502 }
-      );
-    }
-
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
