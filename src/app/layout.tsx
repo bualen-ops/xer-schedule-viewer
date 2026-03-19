@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "График XER — просмотр календарного плана",
-  description: "Загрузка и просмотр графика из Oracle Primavera P6 (.xer)",
+  title: "График — plan.alenos.ru",
+  description: "Просмотр календарного плана из Oracle Primavera P6 (.xer)",
 };
 
 export default function RootLayout({

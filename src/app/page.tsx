@@ -134,7 +134,7 @@ export default function Home() {
         <header className="mb-8">
           <h1 className="text-2xl font-semibold text-slate-900">График из XER (Primavera P6)</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Загрузите файл .xer — отобразится календарный план (работы и сроки).
+            plan.alenos.ru · Загрузите файл .xer — отобразится календарный план (работы и сроки).
           </p>
         </header>
 
