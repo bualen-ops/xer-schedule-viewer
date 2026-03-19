@@ -125,8 +125,8 @@ function buildScheduleCsv(tasks: XerTask[]): string {
       t.task_name ?? '',
       t.start,
       t.end,
-      duration,
-      t.progress,
+      String(duration),
+      String(t.progress),
     ].map(escape).join(sep);
   });
   return '\uFEFF' + [header, ...rows].join('\r\n');
