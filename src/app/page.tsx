@@ -579,9 +579,11 @@ export default function Home() {
                   <p className="break-all">Ответ (начало): {aiDebug.bodyPreview}</p>
                 )}
                 <p className="text-slate-500">
-                  Проверка n8n на сервере: откройте в новой вкладке{' '}
-                  <span className="text-sky-700">/api/analyze-schedule</span> — в JSON должно быть{' '}
-                  <code>n8nWebhookConfigured: true</code>.
+                  Проверка n8n: откройте на <strong>этом же домене</strong>{' '}
+                  <span className="text-sky-700">/api/analyze-schedule</span> — нужны{' '}
+                  <code>vercelEnv</code> (production на основном сайте) и{' '}
+                  <code>n8nWebhookConfigured: true</code>. Если работает только на *.vercel.app — в Vercel
+                  включите переменные для среды <strong>Production</strong>, не только Preview.
                 </p>
               </div>
             </details>

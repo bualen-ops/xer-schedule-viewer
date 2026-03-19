@@ -84,14 +84,26 @@ function buildPrompt(tasks: AnalyzeTask[]): string {
 /** Проверка, видит ли деплой URL n8n (без раскрытия адреса). */
 export async function GET() {
   const urls = resolveN8nAnalyzeWebhookUrls();
+  /** На Vercel: production = основной домен (plan.alenos.ru), preview = *.vercel.app */
+  const vercelEnv = process.env.VERCEL_ENV ?? null;
+
+  let hint: string;
+  if (urls.length > 0) {
+    hint = 'Webhook URL задан; при анализе на сайте запрос уходит на n8n первым.';
+  } else if (vercelEnv === 'production') {
+    hint =
+      'Частая причина: переменные заданы только для Preview (*.vercel.app), но не для Production (ваш домен). В Vercel → Settings → Environment Variables откройте N8N_ANALYZE_WEBHOOK_URL и DEEPSEEK_API_KEY → включите чекбокс Production → Save → Redeploy.';
+  } else {
+    hint =
+      'Задайте N8N_ANALYZE_WEBHOOK_URL для этой среды (Preview/Development) и сделайте Redeploy. Для основного домена обязательно продублируйте те же переменные для Production.';
+  }
+
   return NextResponse.json({
     ok: true,
+    vercelEnv,
     n8nWebhookConfigured: urls.length > 0,
     n8nWebhookUrlCount: urls.length,
-    hint:
-      urls.length === 0
-        ? 'Задайте N8N_ANALYZE_WEBHOOK_URL (Production) в Vercel и сделайте Redeploy. Проверка: POST /api/analyze-schedule с телом { "tasks": [...] }.'
-        : 'Webhook URL задан; при анализе на сайте запрос уходит на n8n первым.',
+    hint,
   });
 }
 
@@ -233,7 +245,7 @@ export async function POST(req: Request) {
       n8nUrls.length > 0 && n8nFailure
         ? `Запрос в n8n не дал анализ: ${n8nFailure} Использован запасной вызов DeepSeek.`
         : n8nUrls.length === 0
-          ? 'Запрос не отправлялся в n8n: не задан URL webhook на сервере. В Vercel → Environment Variables → Production: N8N_ANALYZE_WEBHOOK_URL (полный Production URL Webhook), затем Redeploy. Проверка: откройте GET /api/analyze-schedule — должно быть n8nWebhookConfigured: true.'
+          ? `Запрос не отправлялся в n8n: URL webhook не задан в этой среде (Vercel: ${process.env.VERCEL_ENV ?? 'local'}). Если на *.vercel.app работает, а на основном домене нет — в Environment Variables включите Production для N8N_ANALYZE_WEBHOOK_URL и сделайте Redeploy. GET /api/analyze-schedule — поле n8nWebhookConfigured.`
           : undefined;
 
     const res = NextResponse.json({

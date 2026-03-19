@@ -23,7 +23,7 @@
      - Либо: `NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL` (то же правило; после изменения обязателен **Redeploy**).
    - Если webhook n8n закрыт прокси с заголовком **Authorization**, задайте **`N8N_ANALYZE_WEBHOOK_AUTH`** — полное значение заголовка (например `Bearer ваш-токен` или `Basic …`).
    - Обязательно нажмите **Redeploy** после добавления или смены переменных.
-   - **Проверка:** в браузере откройте `https://ваш-сайт/api/analyze-schedule` (GET). В ответе должно быть `"n8nWebhookConfigured": true`. Если `false` — переменная не подхватилась (часто забыли Production или Redeploy).
+   - **Проверка:** откройте GET **`https://ваш-основной-домен/api/analyze-schedule`** (не только preview `*.vercel.app`). Должно быть `"vercelEnv":"production"` и `"n8nWebhookConfigured":true`. Если на `*.vercel.app` всё ок, а на основном домене `false` — в Vercel у переменных не отмечена среда **Production**; см. `docs/vercel-preview-vs-production.md`.
    - Если анализ работает, но в n8n пусто: **«Технические детали»** на сайте — `Источник ответа: deepseek` и `n8nNote`; заголовок ответа `X-Analyze-Source: deepseek` (в DevTools → Network).
 
 ## Формат запроса/ответа
