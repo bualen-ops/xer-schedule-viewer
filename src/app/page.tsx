@@ -116,7 +116,7 @@ function buildScheduleCsv(tasks: XerTask[]): string {
     const s = String(v ?? '').replace(/"/g, '""');
     return s.includes(sep) || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
   };
-  const header = ['ID', 'Код', 'Название', 'Начало', 'Окончание', 'Длительность (дн.)', 'Прогресс %'].join(sep);
+  const header = ['ID', 'Код', 'Название', 'Начало', 'Окончание', 'Длительность (дн.)', 'Ресурсы', 'Прогресс %'].join(sep);
   const rows = tasks.map((t) => {
     const duration = daysBetween(t.start, t.end);
     return [
@@ -126,6 +126,7 @@ function buildScheduleCsv(tasks: XerTask[]): string {
       t.start,
       t.end,
       String(duration),
+      t.resources ?? '',
       String(t.progress),
     ].map(escape).join(sep);
   });
@@ -171,7 +172,7 @@ function GanttTaskRow({
       <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 font-medium text-slate-800" title={t.task_code} style={{ paddingLeft: 8 + level * INDENT_PX }}>
         {t.task_code || '—'}
       </div>
-      <div className="w-48 flex-shrink-0 border-r border-slate-100 px-2 py-1" style={{ paddingLeft: 8 + level * INDENT_PX }}>
+      <div className="w-72 flex-shrink-0 border-r border-slate-100 px-2 py-1" style={{ paddingLeft: 8 + level * INDENT_PX }}>
         <div className={`truncate ${isCritical ? 'text-red-700 font-semibold' : 'text-slate-700'}`} title={t.task_name}>{t.task_name || '—'}</div>
       </div>
       <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 tabular-nums">
@@ -182,6 +183,12 @@ function GanttTaskRow({
       </div>
       <div className="w-16 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 tabular-nums" title={`${duration} дн.`}>
         {duration} д.
+      </div>
+      <div className="w-28 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 text-xs" style={{ paddingLeft: 8 + level * INDENT_PX }}>
+        <div className="truncate" title={t.resources ?? ''}>{t.resources || '—'}</div>
+      </div>
+      <div className="w-14 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 tabular-nums text-xs">
+        {t.progress}%
       </div>
       <div className="relative w-full max-w-[520px] flex-shrink-0 py-1 pr-4" style={{ minHeight: 28 }}>
         <div
@@ -248,7 +255,7 @@ function GanttWbsRow({
           <span className="inline-block h-5 w-5" />
         )}
       </div>
-      <div className="w-48 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-800" style={{ paddingLeft: level * INDENT_PX }}>
+      <div className="w-72 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-800" style={{ paddingLeft: level * INDENT_PX }}>
         <div className="truncate" title={wbs.wbs_name}>{wbs.wbs_name || '—'}</div>
       </div>
       <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 tabular-nums text-xs">
@@ -259,6 +266,12 @@ function GanttWbsRow({
       </div>
       <div className="w-16 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 tabular-nums text-xs">
         {spanStart && spanEnd ? `${daysBetween(spanStart, spanEnd)} д.` : '—'}
+      </div>
+      <div className="w-28 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 text-xs">
+        —
+      </div>
+      <div className="w-14 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 text-xs">
+        —
       </div>
       <div className="relative w-full max-w-[520px] flex-shrink-0 py-1 pr-4" style={{ minHeight: 28 }}>
         {spanStart && spanEnd && (
@@ -330,14 +343,16 @@ function GanttChart({ schedule }: { schedule: XerSchedule }) {
 
   return (
     <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
-      <div className="min-w-[960px]">
+      <div className="min-w-[1120px]">
         <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-600">
           <div className="w-10 flex-shrink-0 border-r border-slate-200 px-2 py-2">№</div>
           <div className="w-24 flex-shrink-0 border-r border-slate-200 px-3 py-2">Код</div>
-          <div className="w-48 flex-shrink-0 border-r border-slate-200 px-3 py-2">Название</div>
+          <div className="w-72 flex-shrink-0 border-r border-slate-200 px-3 py-2">Название</div>
           <div className="w-24 flex-shrink-0 border-r border-slate-200 px-3 py-2">Начало</div>
           <div className="w-24 flex-shrink-0 border-r border-slate-200 px-3 py-2">Окончание</div>
           <div className="w-16 flex-shrink-0 border-r border-slate-200 px-3 py-2" title="Длительность (дней)">Длит.</div>
+          <div className="w-28 flex-shrink-0 border-r border-slate-200 px-2 py-2">Ресурсы</div>
+          <div className="w-14 flex-shrink-0 border-r border-slate-200 px-2 py-2" title="Процент завершения">% зав.</div>
           <div className="w-full max-w-[520px] flex-shrink-0 py-2 pr-4">
             <div className="relative h-6">
               {timelineLabels.map((d, i) => {
@@ -397,6 +412,9 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [fileName, setFileName] = useState<string>('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -404,6 +422,8 @@ export default function Home() {
     setError(null);
     setSchedule(null);
     setFileName(file.name);
+    setAiError(null);
+    setAiAnalysis(null);
     setLoading(true);
     const reader = new FileReader();
     reader.onload = () => {
@@ -432,6 +452,32 @@ export default function Home() {
     reader.readAsArrayBuffer(file);
   }, []);
 
+  const onAnalyzeWithAi = useCallback(async () => {
+    if (!schedule || schedule.tasks.length === 0) {
+      setAiError('Сначала загрузите файл XER.');
+      return;
+    }
+    try {
+      setAiLoading(true);
+      setAiError(null);
+      setAiAnalysis(null);
+      const response = await fetch('/api/analyze-schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tasks: schedule.tasks }),
+      });
+      const data = (await response.json()) as { analysis?: string; error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || 'Ошибка анализа графика');
+      }
+      setAiAnalysis(data.analysis || 'Пустой ответ от ИИ.');
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : 'Ошибка при анализе графика');
+    } finally {
+      setAiLoading(false);
+    }
+  }, [schedule]);
+
   return (
     <div className="min-h-screen bg-slate-50">
       <main className="mx-auto max-w-7xl px-4 py-8">
@@ -443,6 +489,19 @@ export default function Home() {
         </header>
 
         <section className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={onAnalyzeWithAi}
+              disabled={aiLoading || !schedule}
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              title={!schedule ? 'Сначала загрузите XER' : 'Запустить AI-анализ графика'}
+            >
+              {aiLoading
+                ? 'Анализ графика с помощью ИИ DeepSeek...'
+                : 'Анализ графика с помощью ИИ DeepSeek'}
+            </button>
+          </div>
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Файл .xer</span>
             <input
@@ -456,6 +515,15 @@ export default function Home() {
           {fileName && !loading && <p className="mt-2 text-xs text-slate-500">Выбран: {fileName}</p>}
           {loading && <p className="mt-2 text-sm text-slate-500">Загрузка и разбор…</p>}
           {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+          {aiError && <p className="mt-2 text-sm text-red-600">{aiError}</p>}
+          {aiAnalysis && (
+            <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <p className="mb-2 text-sm font-medium text-emerald-800">
+                Предложения по улучшению графика (DeepSeek)
+              </p>
+              <pre className="whitespace-pre-wrap text-sm text-slate-700">{aiAnalysis}</pre>
+            </div>
+          )}
         </section>
 
         {schedule && (

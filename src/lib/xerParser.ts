@@ -25,6 +25,8 @@ export type XerTask = {
   isCritical?: boolean;
   status_code?: string;
   wbs_id?: string;
+  /** Comma-separated resource names from TASKRSRC + RSRC */
+  resources?: string;
 };
 
 export type XerLink = {
@@ -79,11 +81,18 @@ export function parseXer(content: string): XerSchedule {
   let taskCols: Record<string, number> | null = null;
   let predCols: Record<string, number> | null = null;
   let wbsCols: Record<string, number> | null = null;
+  let rsrcCols: Record<string, number> | null = null;
+  let taskrsrcCols: Record<string, number> | null = null;
 
-  let currentTable: 'TASK' | 'TASKPRED' | 'PROJWBS' | null = null;
+  const rsrcById = new Map<string, string>();
+  const resourcesByTaskId = new Map<string, Set<string>>();
+
+  let currentTable: 'TASK' | 'TASKPRED' | 'PROJWBS' | 'RSRC' | 'TASKRSRC' | null = null;
   let readingTask = false;
   let readingPred = false;
   let readingWbs = false;
+  let readingRsrc = false;
+  let readingTaskrsrc = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -93,10 +102,14 @@ export function parseXer(content: string): XerSchedule {
       if (parts[1] === 'TASK') currentTable = 'TASK';
       else if (parts[1] === 'TASKPRED') currentTable = 'TASKPRED';
       else if (parts[1] === 'PROJWBS') currentTable = 'PROJWBS';
+      else if (parts[1] === 'RSRC') currentTable = 'RSRC';
+      else if (parts[1] === 'TASKRSRC') currentTable = 'TASKRSRC';
       else currentTable = null;
       readingTask = false;
       readingPred = false;
       readingWbs = false;
+      readingRsrc = false;
+      readingTaskrsrc = false;
       continue;
     }
 
@@ -108,24 +121,61 @@ export function parseXer(content: string): XerSchedule {
         readingTask = true;
         readingPred = false;
         readingWbs = false;
+        readingRsrc = false;
+        readingTaskrsrc = false;
       } else if (currentTable === 'TASKPRED') {
         predCols = {};
         headers.forEach((h, idx) => { predCols![h] = idx; });
         readingPred = true;
         readingTask = false;
         readingWbs = false;
+        readingRsrc = false;
+        readingTaskrsrc = false;
       } else if (currentTable === 'PROJWBS') {
         wbsCols = {};
         headers.forEach((h, idx) => { wbsCols![h] = idx; });
         readingWbs = true;
         readingTask = false;
         readingPred = false;
+        readingRsrc = false;
+        readingTaskrsrc = false;
+      } else if (currentTable === 'RSRC') {
+        rsrcCols = {};
+        headers.forEach((h, idx) => { rsrcCols![h] = idx; });
+        readingRsrc = true;
+        readingTask = false;
+        readingPred = false;
+        readingWbs = false;
+        readingTaskrsrc = false;
+      } else if (currentTable === 'TASKRSRC') {
+        taskrsrcCols = {};
+        headers.forEach((h, idx) => { taskrsrcCols![h] = idx; });
+        readingTaskrsrc = true;
+        readingTask = false;
+        readingPred = false;
+        readingWbs = false;
+        readingRsrc = false;
       }
       continue;
     }
 
     if (parts[0] === '%R' && parts.length > 1) {
       const row = parts.slice(1);
+
+      if (readingRsrc && rsrcCols && rsrcCols.rsrc_id !== undefined) {
+        const rsrc_id = String(row[rsrcCols.rsrc_id] ?? '').trim();
+        const rsrc_name = rsrcCols.rsrc_name !== undefined ? String(row[rsrcCols.rsrc_name] ?? '').trim() : rsrc_id;
+        if (rsrc_id) rsrcById.set(rsrc_id, rsrc_name || rsrc_id);
+      }
+
+      if (readingTaskrsrc && taskrsrcCols && taskrsrcCols.task_id !== undefined && taskrsrcCols.rsrc_id !== undefined) {
+        const task_id = String(row[taskrsrcCols.task_id] ?? '').trim();
+        const rsrc_id = String(row[taskrsrcCols.rsrc_id] ?? '').trim();
+        if (task_id && rsrc_id) {
+          if (!resourcesByTaskId.has(task_id)) resourcesByTaskId.set(task_id, new Set());
+          resourcesByTaskId.get(task_id)!.add(rsrc_id);
+        }
+      }
 
       if (readingWbs && wbsCols && wbsCols.wbs_id !== undefined) {
         const wbs_id = String(row[wbsCols.wbs_id] ?? '').trim();
@@ -184,6 +234,14 @@ export function parseXer(content: string): XerSchedule {
       }
     }
   }
+
+  tasks.forEach((t) => {
+    const rsrcIds = resourcesByTaskId.get(t.id);
+    if (rsrcIds && rsrcIds.size > 0) {
+      const names = [...rsrcIds].map((id) => rsrcById.get(id) ?? id).sort();
+      t.resources = names.join(', ');
+    }
+  });
 
   return { tasks, links, wbs };
 }
