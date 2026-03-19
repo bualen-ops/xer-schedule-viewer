@@ -83,6 +83,7 @@ export async function POST(req: Request) {
     if (n8nUrl && typeof n8nUrl === 'string' && n8nUrl.trim() !== '') {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 45000);
+      let n8nFailure: string | undefined;
       try {
         const resp = await fetch(n8nUrl, {
           method: 'POST',
@@ -96,34 +97,25 @@ export async function POST(req: Request) {
         try {
           data = text ? (JSON.parse(text) as { analysis?: string; error?: string }) : {};
         } catch {
-          return NextResponse.json(
-            { error: `n8n вернул не JSON ответ (HTTP ${resp.status}).` },
-            { status: 502 }
-          );
+          n8nFailure = `n8n returned non-JSON (HTTP ${resp.status}). Preview: ${text.slice(0, 200)}`;
+          // fallback to DeepSeek below
+          data = {};
         }
 
-        if (!resp.ok) {
-          return NextResponse.json(
-            { error: data.error || `n8n error (HTTP ${resp.status}).` },
-            { status: 502 }
-          );
+        if (resp.ok) {
+          const analysis = data.analysis;
+          if (analysis) return NextResponse.json({ analysis });
+          n8nFailure = data.error || 'n8n returned empty analysis.';
+        } else {
+          n8nFailure = data.error || `n8n error (HTTP ${resp.status}).`;
         }
-
-        const analysis = data.analysis;
-        if (!analysis) {
-          return NextResponse.json(
-            { error: data.error || 'n8n вернул пустой ответ.' },
-            { status: 502 }
-          );
-        }
-
-        return NextResponse.json({ analysis });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         if (message.toLowerCase().includes('aborted')) {
-          return NextResponse.json({ error: 'n8n timeout (45s).' }, { status: 504 });
+          n8nFailure = 'n8n timeout (45s).';
+        } else {
+          n8nFailure = `n8n request failed: ${message}`;
         }
-        return NextResponse.json({ error: `n8n request failed: ${message}` }, { status: 502 });
       } finally {
         clearTimeout(timeout);
       }
