@@ -131,7 +131,9 @@ export async function POST(req: Request) {
 
     if (n8nUrls.length > 0) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 45000);
+      // Ограничиваем время, чтобы сайт на Production не отдавал "Load failed".
+      // Даже если n8n упал/завис — должен успеть сработать fallback в DeepSeek.
+      const timeout = setTimeout(() => controller.abort(), 20000);
       const payload = JSON.stringify({ tasks: tasksToSend });
       const headers = buildN8nOutboundHeaders();
 
@@ -199,7 +201,7 @@ export async function POST(req: Request) {
     try {
       // Чтобы не получать "Load failed" в браузере из-за длительного ожидания ответа.
       const deepseekController = new AbortController();
-      const deepseekTimeout = setTimeout(() => deepseekController.abort(), 35000);
+      const deepseekTimeout = setTimeout(() => deepseekController.abort(), 20000);
       resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
         headers: {
