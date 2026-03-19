@@ -471,7 +471,8 @@ export default function Home() {
     setAiAnalysis(null);
     setAiDebug(null);
     try {
-      const tasksToSend = schedule.tasks.slice(0, 200);
+      // Ограничиваем размер входных данных для стабильной доставки на Production.
+      const tasksToSend = schedule.tasks.slice(0, 80);
       const payload = { tasks: tasksToSend };
       // Всегда зовем наш API, чтобы запрос делался на сервере (без CORS) и гарантированно попал в n8n.
       const response = await fetch('/api/analyze-schedule', {
