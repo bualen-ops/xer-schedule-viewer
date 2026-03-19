@@ -59,8 +59,15 @@ export async function POST(req: Request) {
     const tasksToSend = tasks.slice(0, 200);
 
     // Если настроен n8n, проксируем запрос туда (и возвращаем результат обратно в сайт).
-    // Так гарантируем отсутствие CORS и то, что запрос реально попадает в n8n.
-    const n8nUrl = process.env.N8N_ANALYZE_WEBHOOK_URL;
+    // В Vercel можно задать либо серверную `N8N_ANALYZE_WEBHOOK_URL`, либо (для простоты) `NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL`.
+    const n8nUrl =
+      (process.env.N8N_ANALYZE_WEBHOOK_URL && process.env.N8N_ANALYZE_WEBHOOK_URL.trim() !== ''
+        ? process.env.N8N_ANALYZE_WEBHOOK_URL
+        : undefined) ||
+      (process.env.NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL &&
+      process.env.NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL.trim() !== ''
+        ? process.env.NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL
+        : undefined);
     if (n8nUrl && typeof n8nUrl === 'string' && n8nUrl.trim() !== '') {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 45000);
