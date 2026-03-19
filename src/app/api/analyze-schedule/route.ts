@@ -50,7 +50,19 @@ function buildPrompt(tasks: AnalyzeTask[]): string {
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as AnalyzeRequest;
+    // Вместо req.json() используем req.text() + JSON.parse.
+    // На prod Vercel у нас сейчас req.json() возвращает 502 с сообщением про JSON,
+    // хотя клиент отправляет корректное application/json.
+    const raw = await req.text();
+    let body: AnalyzeRequest = {};
+    try {
+      body = raw ? (JSON.parse(raw) as AnalyzeRequest) : {};
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid JSON body' },
+        { status: 400 }
+      );
+    }
     const tasks = Array.isArray(body.tasks) ? body.tasks : [];
     if (tasks.length === 0) {
       return NextResponse.json({ error: 'Нет данных задач для анализа.' }, { status: 400 });
