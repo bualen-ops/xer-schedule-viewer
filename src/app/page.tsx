@@ -416,6 +416,7 @@ export default function Home() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
+  const [aiDebug, setAiDebug] = useState<{ status?: number; bodyPreview?: string; error?: string } | null>(null);
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -456,38 +457,49 @@ export default function Home() {
   const onAnalyzeWithAi = useCallback(async () => {
     if (!schedule || schedule.tasks.length === 0) {
       setAiError('Сначала загрузите файл XER.');
+      setAiDebug(null);
       return;
     }
     setAiLoading(true);
     setAiError(null);
     setAiAnalysis(null);
+    setAiDebug(null);
     try {
+      const tasksToSend = schedule.tasks.slice(0, 200);
+      const payload = { tasks: tasksToSend };
       const response = await fetch('/api/analyze-schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tasks: schedule.tasks }),
+        body: JSON.stringify(payload),
       });
       const text = await response.text();
+      const bodyPreview = text.length > 600 ? text.slice(0, 600) + '…' : text;
+      setAiDebug({ status: response.status, bodyPreview });
+
       let data: { analysis?: string; error?: string };
       try {
         data = text ? (JSON.parse(text) as { analysis?: string; error?: string }) : {};
       } catch {
         setAiError(response.ok ? 'Неверный ответ сервера.' : `Ошибка сервера (${response.status}). Попробуйте позже.`);
+        setAiDebug((d) => (d ? { ...d, error: 'JSON parse failed' } : null));
         return;
       }
       if (!response.ok) {
-        setAiError(data.error || `Ошибка анализа (${response.status}). Проверьте DEEPSEEK_API_KEY в настройках Vercel.`);
+        const msg = data.error || `Ошибка анализа (${response.status}). Проверьте DEEPSEEK_API_KEY в настройках Vercel.`;
+        setAiError(msg);
+        setAiDebug((d) => (d ? { ...d, error: msg } : null));
         return;
       }
       setAiAnalysis(data.analysis || 'Пустой ответ от ИИ.');
     } catch (err) {
-      setAiError(
+      const msg =
         err instanceof Error && err.message === 'Failed to fetch'
           ? 'Сеть недоступна или таймаут. Проверьте интернет и повторите.'
           : err instanceof Error
             ? err.message
-            : 'Ошибка при анализе графика.'
-      );
+            : 'Ошибка при анализе графика.';
+      setAiError(msg);
+      setAiDebug({ error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) });
     } finally {
       setAiLoading(false);
     }
@@ -531,6 +543,18 @@ export default function Home() {
           {loading && <p className="mt-2 text-sm text-slate-500">Загрузка и разбор…</p>}
           {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
           {aiError && <p className="mt-2 text-sm text-red-600">{aiError}</p>}
+          {aiDebug && (
+            <details className="mt-2 rounded border border-slate-200 bg-slate-50 p-2 text-xs">
+              <summary className="cursor-pointer font-medium text-slate-600">Технические детали последнего запроса</summary>
+              <div className="mt-2 space-y-1 font-mono text-slate-600">
+                {aiDebug.status != null && <p>HTTP статус: {aiDebug.status}</p>}
+                {aiDebug.error && <p className="text-red-600">Ошибка: {aiDebug.error}</p>}
+                {aiDebug.bodyPreview && (
+                  <p className="break-all">Ответ (начало): {aiDebug.bodyPreview}</p>
+                )}
+              </div>
+            </details>
+          )}
           {aiAnalysis && (
             <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
               <p className="mb-2 text-sm font-medium text-emerald-800">
