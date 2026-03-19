@@ -132,10 +132,8 @@ export async function POST(req: Request) {
     let n8nTimedOut = false;
 
     if (n8nUrls.length > 0) {
-      const controller = new AbortController();
       // Ограничиваем время, чтобы сайт на Production не отдавал "Load failed".
-      // Даже если n8n упал/завис — должен успеть сработать fallback в DeepSeek.
-      const timeout = setTimeout(() => controller.abort(), 20000);
+      const n8nSignal = AbortSignal.timeout(20000);
       const payload = JSON.stringify({ tasks: tasksToSend });
       const headers = buildN8nOutboundHeaders();
 
@@ -147,7 +145,7 @@ export async function POST(req: Request) {
               method: 'POST',
               headers,
               body: payload,
-              signal: controller.signal,
+              signal: n8nSignal,
               cache: 'no-store',
               redirect: 'follow',
             });
@@ -174,7 +172,10 @@ export async function POST(req: Request) {
             }
           } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error';
-            if (message.toLowerCase().includes('aborted')) {
+            if (
+              error instanceof Error &&
+              (error.name === 'AbortError' || message.toLowerCase().includes('aborted'))
+            ) {
               n8nTimedOut = true;
               n8nFailure = 'n8n timeout (20s).';
               break;
@@ -186,9 +187,7 @@ export async function POST(req: Request) {
             n8nFailure = `${n8nFailure || 'failed'} (пробуем следующий URL…)`;
           }
         }
-      } finally {
-        clearTimeout(timeout);
-      }
+      } finally {}
     }
 
     // Если n8n отвалился по таймауту — лучше вернуть контролируемую ошибку,
@@ -212,8 +211,7 @@ export async function POST(req: Request) {
     let resp: Response;
     try {
       // Чтобы не получать "Load failed" в браузере из-за длительного ожидания ответа.
-      const deepseekController = new AbortController();
-      const deepseekTimeout = setTimeout(() => deepseekController.abort(), 12000);
+      const deepseekSignal = AbortSignal.timeout(12000);
       resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -233,12 +231,14 @@ export async function POST(req: Request) {
           ],
         }),
         cache: 'no-store',
-        signal: deepseekController.signal,
+        signal: deepseekSignal,
       });
-      clearTimeout(deepseekTimeout);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      if (message.toLowerCase().includes('aborted')) {
+      if (
+        error instanceof Error &&
+        (error.name === 'AbortError' || message.toLowerCase().includes('aborted'))
+      ) {
         return NextResponse.json({ error: 'DeepSeek timeout (12s).' }, { status: 504 });
       }
       return NextResponse.json({ error: `DeepSeek fetch failed: ${message}` }, { status: 502 });
