@@ -3,6 +3,46 @@
 import { useCallback, useMemo, useState } from 'react';
 import { parseXer, type XerSchedule, type XerTask } from '@/lib/xerParser';
 
+const DISPLAY_LIMIT = 200;
+const MAX_TIMELINE_LABELS = 14;
+
+function GanttRow({
+  t,
+  leftPct,
+  widthPct,
+}: {
+  t: XerTask;
+  leftPct: number;
+  widthPct: number;
+}) {
+  return (
+    <div className="flex border-b border-slate-100 py-1 text-sm hover:bg-slate-50">
+      <div className="w-48 flex-shrink-0 border-r border-slate-100 px-2 py-1">
+        <div className="truncate font-medium text-slate-800" title={t.task_name}>{t.task_code}</div>
+        <div className="truncate text-xs text-slate-500" title={t.task_name}>{t.task_name}</div>
+      </div>
+      <div className="relative flex-1 py-1 pr-4" style={{ minHeight: 28 }}>
+        <div
+          className="absolute top-1 h-5 rounded bg-sky-500/80"
+          style={{
+            left: `${leftPct}%`,
+            width: `${widthPct}%`,
+            minWidth: 4,
+          }}
+          title={`${t.start} — ${t.end} · ${t.progress}%`}
+        >
+          {t.progress > 0 && (
+            <div
+              className="h-full rounded bg-sky-600/60"
+              style={{ width: `${t.progress}%` }}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GanttChart({ tasks, links }: { tasks: XerTask[]; links: XerSchedule['links'] }) {
   const sorted = useMemo(() => [...tasks].sort((a, b) => a.start.localeCompare(b.start)), [tasks]);
   const minDate = useMemo(() => sorted[0]?.start ?? '', [sorted]);
@@ -19,18 +59,29 @@ function GanttChart({ tasks, links }: { tasks: XerTask[]; links: XerSchedule['li
     return Math.max(1, (b - a) / (24 * 60 * 60 * 1000));
   }, [minDate, maxDate]);
 
-  const leftPct = (dateStr: string) => {
+  const leftPct = useCallback((dateStr: string) => {
     const d = new Date(dateStr).getTime();
     const min = new Date(minDate).getTime();
     return ((d - min) / (24 * 60 * 60 * 1000) / totalDays) * 100;
-  };
-  const widthPct = (start: string, end: string) => {
+  }, [minDate, totalDays]);
+
+  const widthPct = useCallback((start: string, end: string) => {
     const s = new Date(start).getTime();
     const e = new Date(end).getTime();
     return Math.max(0.5, ((e - s) / (24 * 60 * 60 * 1000) / totalDays) * 100);
-  };
+  }, [totalDays]);
 
-  const displayTasks = sorted.slice(0, 400);
+  const displayTasks = useMemo(() => sorted.slice(0, DISPLAY_LIMIT), [sorted]);
+
+  const timelineLabels = useMemo(() => {
+    const count = Math.min(MAX_TIMELINE_LABELS, Math.ceil(totalDays / 7) + 1);
+    const step = Math.max(1, Math.floor((Math.ceil(totalDays / 7) + 1) / count));
+    return Array.from({ length: count }, (_, i) => {
+      const d = new Date(minDate);
+      d.setDate(d.getDate() + i * step * 7);
+      return d;
+    });
+  }, [minDate, totalDays]);
 
   return (
     <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
@@ -38,15 +89,13 @@ function GanttChart({ tasks, links }: { tasks: XerTask[]; links: XerSchedule['li
         <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-600">
           <div className="w-48 flex-shrink-0 border-r border-slate-200 px-3 py-2">Код / Название</div>
           <div className="flex-1 py-2 pr-4">
-            <div className="relative h-6" style={{ minWidth: `${Math.max(100, totalDays / 7) * 2}px` }}>
-              {Array.from({ length: Math.ceil(totalDays / 7) + 1 }).map((_, i) => {
-                const d = new Date(minDate);
-                d.setDate(d.getDate() + i * 7);
+            <div className="relative h-6">
+              {timelineLabels.map((d, i) => {
                 const x = leftPct(d.toISOString().slice(0, 10));
                 return (
                   <span
                     key={i}
-                    className="absolute -translate-x-1/2 text-slate-400"
+                    className="absolute -translate-x-1/2 whitespace-nowrap text-slate-400"
                     style={{ left: `${x}%` }}
                   >
                     {d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })}
@@ -57,33 +106,12 @@ function GanttChart({ tasks, links }: { tasks: XerTask[]; links: XerSchedule['li
           </div>
         </div>
         {displayTasks.map((t) => (
-          <div
+          <GanttRow
             key={t.id}
-            className="flex border-b border-slate-100 py-1 text-sm hover:bg-slate-50"
-          >
-            <div className="w-48 flex-shrink-0 border-r border-slate-100 px-2 py-1">
-              <div className="truncate font-medium text-slate-800" title={t.task_name}>{t.task_code}</div>
-              <div className="truncate text-xs text-slate-500" title={t.task_name}>{t.task_name}</div>
-            </div>
-            <div className="relative flex-1 py-1 pr-4" style={{ minHeight: 28 }}>
-              <div
-                className="absolute top-1 h-5 rounded bg-sky-500/80"
-                style={{
-                  left: `${leftPct(t.start)}%`,
-                  width: `${widthPct(t.start, t.end)}%`,
-                  minWidth: 4,
-                }}
-                title={`${t.start} — ${t.end} · ${t.progress}%`}
-              >
-                {t.progress > 0 && (
-                  <div
-                    className="h-full rounded bg-sky-600/60"
-                    style={{ width: `${t.progress}%` }}
-                  />
-                )}
-              </div>
-            </div>
-          </div>
+            t={t}
+            leftPct={leftPct(t.start)}
+            widthPct={widthPct(t.start, t.end)}
+          />
         ))}
       </div>
       {tasks.length > displayTasks.length && (
@@ -111,7 +139,14 @@ export default function Home() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const text = reader.result as string;
+        const buffer = reader.result as ArrayBuffer;
+        const bytes = new Uint8Array(buffer);
+        let text: string;
+        try {
+          text = new TextDecoder('windows-1251').decode(bytes);
+        } catch {
+          text = new TextDecoder('utf-8').decode(bytes);
+        }
         const parsed = parseXer(text);
         setSchedule(parsed);
         if (parsed.tasks.length === 0) setError('В файле не найдено ни одной работы (TASK).');
@@ -125,7 +160,7 @@ export default function Home() {
       setError('Не удалось прочитать файл');
       setLoading(false);
     };
-    reader.readAsText(file, 'utf-8');
+    reader.readAsArrayBuffer(file);
   }, []);
 
   return (
