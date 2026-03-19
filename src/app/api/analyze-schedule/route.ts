@@ -104,7 +104,7 @@ export async function POST(req: Request) {
 
         if (resp.ok) {
           const analysis = data.analysis;
-          if (analysis) return NextResponse.json({ analysis });
+          if (analysis) return NextResponse.json({ analysis, source: 'n8n' });
           n8nFailure = data.error || 'n8n returned empty analysis.';
         } else {
           n8nFailure = data.error || `n8n error (HTTP ${resp.status}).`;
@@ -179,7 +179,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'DeepSeek вернул пустой ответ.' }, { status: 502 });
     }
 
-    return NextResponse.json({ analysis });
+    return NextResponse.json({ analysis, source: 'deepseek' });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Неизвестная ошибка';
     return NextResponse.json({ error: message }, { status: 500 });
