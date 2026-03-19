@@ -1,6 +1,18 @@
 /**
  * Parser for Oracle Primavera P6 XER export.
  * Extracts TASK and TASKPRED tables for Gantt display.
+ *
+ * Пример сырых строк таблицы TASK в XER (табуляция между полями):
+ *
+ *   %T	TASK
+ *   %F	task_id	task_code	task_name	early_start_date	early_end_date	target_start_date	target_end_date	phys_complete_pct	status_code	wbs_id	...
+ *   %R	1001	A-100	Подготовка площадки	2024-01-15 00:00	2024-02-28 00:00	2024-01-15 00:00	2024-02-28 00:00	0	TK_NotStart	10	...
+ *   %R	1002	B-200	Фундаментные работы	2024-03-01 00:00	2024-04-15 00:00	2024-03-01 00:00	2024-04-15 00:00	50	TK_Complete	10	...
+ *   %R	1003	C-300	Монтаж конструкций	2024-04-16 00:00	2024-06-30 00:00	2024-04-16 00:00	2024-06-30 00:00	0	TK_NotStart	20	...
+ *   %E
+ *
+ * Парсер использует: task_id, task_code, task_name, early_start_date, early_end_date,
+ * target_start_date, target_end_date, phys_complete_pct, status_code, wbs_id.
  */
 
 export type XerTask = {
@@ -20,9 +32,18 @@ export type XerLink = {
   type?: string; // e.g. PR_FS
 };
 
+/** WBS element from PROJWBS table (parent_wbs_id empty or 0 = root) */
+export type XerWbsNode = {
+  id: string;
+  parent_wbs_id: string | null;
+  wbs_name: string;
+  seq_num: number;
+};
+
 export type XerSchedule = {
   tasks: XerTask[];
   links: XerLink[];
+  wbs: XerWbsNode[];
   projectName?: string;
 };
 
@@ -43,12 +64,15 @@ export function parseXer(content: string): XerSchedule {
   const lines = content.split(/\r?\n/);
   const tasks: XerTask[] = [];
   const links: XerLink[] = [];
+  const wbs: XerWbsNode[] = [];
   let taskCols: Record<string, number> | null = null;
   let predCols: Record<string, number> | null = null;
+  let wbsCols: Record<string, number> | null = null;
 
-  let currentTable: 'TASK' | 'TASKPRED' | null = null;
+  let currentTable: 'TASK' | 'TASKPRED' | 'PROJWBS' | null = null;
   let readingTask = false;
   let readingPred = false;
+  let readingWbs = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -57,9 +81,11 @@ export function parseXer(content: string): XerSchedule {
     if (parts[0] === '%T') {
       if (parts[1] === 'TASK') currentTable = 'TASK';
       else if (parts[1] === 'TASKPRED') currentTable = 'TASKPRED';
+      else if (parts[1] === 'PROJWBS') currentTable = 'PROJWBS';
       else currentTable = null;
       readingTask = false;
       readingPred = false;
+      readingWbs = false;
       continue;
     }
 
@@ -70,17 +96,36 @@ export function parseXer(content: string): XerSchedule {
         headers.forEach((h, idx) => { taskCols![h] = idx; });
         readingTask = true;
         readingPred = false;
+        readingWbs = false;
       } else if (currentTable === 'TASKPRED') {
         predCols = {};
         headers.forEach((h, idx) => { predCols![h] = idx; });
         readingPred = true;
         readingTask = false;
+        readingWbs = false;
+      } else if (currentTable === 'PROJWBS') {
+        wbsCols = {};
+        headers.forEach((h, idx) => { wbsCols![h] = idx; });
+        readingWbs = true;
+        readingTask = false;
+        readingPred = false;
       }
       continue;
     }
 
     if (parts[0] === '%R' && parts.length > 1) {
       const row = parts.slice(1);
+
+      if (readingWbs && wbsCols && wbsCols.wbs_id !== undefined) {
+        const wbs_id = String(row[wbsCols.wbs_id] ?? '').trim();
+        const parent = row[wbsCols.parent_wbs_id];
+        const parent_wbs_id = parent === undefined || parent === null || String(parent).trim() === '' || String(parent) === '0' ? null : String(parent).trim();
+        const wbs_name = String(row[wbsCols.wbs_name] ?? '').trim();
+        const seq_num = Number(row[wbsCols.seq_num]) || 0;
+        if (wbs_id) {
+          wbs.push({ id: wbs_id, parent_wbs_id, wbs_name, seq_num });
+        }
+      }
 
       if (readingTask && taskCols && taskCols.task_id !== undefined) {
         const task_id = row[taskCols.task_id];
@@ -105,7 +150,7 @@ export function parseXer(content: string): XerSchedule {
             end,
             progress,
             status_code,
-            wbs_id,
+            wbs_id: wbs_id != null ? String(wbs_id).trim() : undefined,
           });
         }
       }
@@ -125,5 +170,5 @@ export function parseXer(content: string): XerSchedule {
     }
   }
 
-  return { tasks, links };
+  return { tasks, links, wbs };
 }

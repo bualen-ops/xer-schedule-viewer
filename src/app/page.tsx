@@ -1,10 +1,99 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import { parseXer, type XerSchedule, type XerTask } from '@/lib/xerParser';
+import { parseXer, type XerSchedule, type XerTask, type XerWbsNode } from '@/lib/xerParser';
 
-const DISPLAY_LIMIT = 200;
+const DISPLAY_LIMIT = 500;
 const MAX_TIMELINE_LABELS = 14;
+
+type GanttRowItem =
+  | { type: 'wbs'; wbs: XerWbsNode; level: number; hasChildren: boolean; spanStart?: string; spanEnd?: string }
+  | { type: 'task'; task: XerTask; level: number };
+
+function buildWbsTree(schedule: XerSchedule) {
+  const { wbs, tasks } = schedule;
+  const wbsById = new Map<string, XerWbsNode>();
+  wbs.forEach((n) => wbsById.set(n.id, n));
+  const childrenByParent = new Map<string, XerWbsNode[]>();
+  wbs.forEach((n) => {
+    const pid = n.parent_wbs_id ?? '';
+    const key = pid === '0' ? '' : pid;
+    if (!childrenByParent.has(key)) childrenByParent.set(key, []);
+    childrenByParent.get(key)!.push(n);
+  });
+  childrenByParent.forEach((arr) => arr.sort((a, b) => a.seq_num - b.seq_num || a.id.localeCompare(b.id)));
+  let roots = (childrenByParent.get('') ?? []).sort((a, b) => a.seq_num - b.seq_num || a.id.localeCompare(b.id));
+  if (roots.length === 0 && wbs.length > 0) {
+    roots = wbs
+      .filter((n) => !n.parent_wbs_id || n.parent_wbs_id === '0' || !wbsById.has(n.parent_wbs_id))
+      .sort((a, b) => a.seq_num - b.seq_num || a.id.localeCompare(b.id));
+  }
+  const tasksByWbs = new Map<string, XerTask[]>();
+  tasks.forEach((t) => {
+    const wid = t.wbs_id ?? '';
+    if (!tasksByWbs.has(wid)) tasksByWbs.set(wid, []);
+    tasksByWbs.get(wid)!.push(t);
+  });
+  tasksByWbs.forEach((arr) => arr.sort((a, b) => a.start.localeCompare(b.start)));
+  const wbsSpan = new Map<string, { start: string; end: string }>();
+  function span(wbsId: string): { start: string; end: string } {
+    if (wbsSpan.has(wbsId)) return wbsSpan.get(wbsId)!;
+    const tasks = tasksByWbs.get(wbsId) ?? [];
+    const childIds = (childrenByParent.get(wbsId) ?? []).map((c) => c.id);
+    let start = '';
+    let end = '';
+    tasks.forEach((t) => {
+      if (!start || t.start < start) start = t.start;
+      if (!end || t.end > end) end = t.end;
+    });
+    childIds.forEach((cid) => {
+      const s = span(cid);
+      if (s.start && (!start || s.start < start)) start = s.start;
+      if (s.end && (!end || s.end > end)) end = s.end;
+    });
+    const r = { start, end };
+    wbsSpan.set(wbsId, r);
+    return r;
+  }
+  wbs.forEach((n) => span(n.id));
+  return { wbsById, childrenByParent, roots, tasksByWbs, wbsSpan };
+}
+
+function buildVisibleRows(
+  schedule: XerSchedule,
+  expandedIds: Set<string>
+): GanttRowItem[] {
+  const { wbs, tasks } = schedule;
+  if (wbs.length === 0) {
+    return tasks.slice(0, DISPLAY_LIMIT).map((task) => ({ type: 'task' as const, task, level: 0 }));
+  }
+  const { childrenByParent, roots, tasksByWbs, wbsSpan } = buildWbsTree(schedule);
+  const out: GanttRowItem[] = [];
+  function add(wbsNode: XerWbsNode, level: number) {
+    const childWbs = childrenByParent.get(wbsNode.id) ?? [];
+    const directTasks = tasksByWbs.get(wbsNode.id) ?? [];
+    const hasChildren = childWbs.length > 0 || directTasks.length > 0;
+    const span = wbsSpan.get(wbsNode.id);
+    out.push({
+      type: 'wbs',
+      wbs: wbsNode,
+      level,
+      hasChildren,
+      spanStart: span?.start,
+      spanEnd: span?.end,
+    });
+    if (!expandedIds.has(wbsNode.id)) return;
+    directTasks.forEach((task) => out.push({ type: 'task', task, level: level + 1 }));
+    childWbs.forEach((ch) => add(ch, level + 1));
+  }
+  roots.forEach((r) => add(r, 0));
+  const seenWbs = new Set(wbs.map((n) => n.id));
+  const orphanWbsIds = [...tasksByWbs.keys()].filter((wid) => wid && !seenWbs.has(wid));
+  orphanWbsIds.forEach((wid) => {
+    (tasksByWbs.get(wid) ?? []).forEach((task) => out.push({ type: 'task', task, level: 0 }));
+  });
+  return out.slice(0, DISPLAY_LIMIT);
+}
 
 function daysBetween(start: string, end: string): number {
   const a = new Date(start).getTime();
@@ -20,22 +109,60 @@ function formatDate(iso: string): string {
   });
 }
 
-function GanttRow({
+/** CSV for Excel: semicolon separator, UTF-8 BOM, fields quoted if contain ; or " */
+function buildScheduleCsv(tasks: XerTask[]): string {
+  const sep = ';';
+  const escape = (v: string) => {
+    const s = String(v ?? '').replace(/"/g, '""');
+    return s.includes(sep) || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+  };
+  const header = ['ID', 'Код', 'Название', 'Начало', 'Окончание', 'Длительность (дн.)', 'Прогресс %'].join(sep);
+  const rows = tasks.map((t) => {
+    const duration = daysBetween(t.start, t.end);
+    return [
+      t.id,
+      t.task_code ?? '',
+      t.task_name ?? '',
+      t.start,
+      t.end,
+      duration,
+      t.progress,
+    ].map(escape).join(sep);
+  });
+  return '\uFEFF' + [header, ...rows].join('\r\n');
+}
+
+function downloadCsv(tasks: XerTask[]) {
+  const csv = buildScheduleCsv(tasks);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `schedule_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+const INDENT_PX = 20;
+
+function GanttTaskRow({
   t,
+  level,
   leftPct,
   widthPct,
 }: {
   t: XerTask;
+  level: number;
   leftPct: number;
   widthPct: number;
 }) {
   const duration = daysBetween(t.start, t.end);
   return (
     <div className="flex border-b border-slate-100 py-1 text-sm hover:bg-slate-50">
-      <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 font-medium text-slate-800" title={t.task_code}>
+      <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 font-medium text-slate-800" title={t.task_code} style={{ paddingLeft: 8 + level * INDENT_PX }}>
         {t.task_code || '—'}
       </div>
-      <div className="w-48 flex-shrink-0 border-r border-slate-100 px-2 py-1">
+      <div className="w-48 flex-shrink-0 border-r border-slate-100 px-2 py-1" style={{ paddingLeft: 8 + level * INDENT_PX }}>
         <div className="truncate text-slate-700" title={t.task_name}>{t.task_name || '—'}</div>
       </div>
       <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 tabular-nums">
@@ -69,7 +196,76 @@ function GanttRow({
   );
 }
 
-function GanttChart({ tasks, links }: { tasks: XerTask[]; links: XerSchedule['links'] }) {
+function GanttWbsRow({
+  wbs,
+  level,
+  hasChildren,
+  expanded,
+  onToggle,
+  spanStart,
+  spanEnd,
+  leftPct,
+  widthPct,
+}: {
+  wbs: XerWbsNode;
+  level: number;
+  hasChildren: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  spanStart: string;
+  spanEnd: string;
+  leftPct: number;
+  widthPct: number;
+}) {
+  return (
+    <div className="flex border-b border-slate-200 bg-slate-50/80 py-1 text-sm font-medium hover:bg-slate-100">
+      <div className="w-24 flex-shrink-0 border-r border-slate-100 py-1" style={{ paddingLeft: 8 + level * INDENT_PX }}>
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-500 hover:bg-slate-200 hover:text-slate-700"
+            aria-label={expanded ? 'Свернуть' : 'Развернуть'}
+            title={expanded ? 'Свернуть' : 'Развернуть'}
+          >
+            {expanded ? '−' : '+'}
+          </button>
+        ) : (
+          <span className="inline-block h-5 w-5" />
+        )}
+      </div>
+      <div className="w-48 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-800" style={{ paddingLeft: level * INDENT_PX }}>
+        <div className="truncate" title={wbs.wbs_name}>{wbs.wbs_name || '—'}</div>
+      </div>
+      <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 tabular-nums text-xs">
+        {spanStart ? formatDate(spanStart) : '—'}
+      </div>
+      <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 tabular-nums text-xs">
+        {spanEnd ? formatDate(spanEnd) : '—'}
+      </div>
+      <div className="w-16 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-500 tabular-nums text-xs">
+        {spanStart && spanEnd ? `${daysBetween(spanStart, spanEnd)} д.` : '—'}
+      </div>
+      <div className="relative flex-1 py-1 pr-4" style={{ minHeight: 28 }}>
+        {spanStart && spanEnd && (
+          <div
+            className="absolute top-1 h-5 rounded bg-slate-400/50"
+            style={{
+              left: `${leftPct}%`,
+              width: `${widthPct}%`,
+              minWidth: 4,
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GanttChart({ schedule }: { schedule: XerSchedule }) {
+  const { tasks } = schedule;
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+
   const sorted = useMemo(() => [...tasks].sort((a, b) => a.start.localeCompare(b.start)), [tasks]);
   const minDate = useMemo(() => sorted[0]?.start ?? '', [sorted]);
   const maxDate = useMemo(() => {
@@ -97,7 +293,16 @@ function GanttChart({ tasks, links }: { tasks: XerTask[]; links: XerSchedule['li
     return Math.max(0.5, ((e - s) / (24 * 60 * 60 * 1000) / totalDays) * 100);
   }, [totalDays]);
 
-  const displayTasks = useMemo(() => sorted.slice(0, DISPLAY_LIMIT), [sorted]);
+  const visibleRows = useMemo(() => buildVisibleRows(schedule, expandedIds), [schedule, expandedIds]);
+
+  const toggleWbs = useCallback((wbsId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(wbsId)) next.delete(wbsId);
+      else next.add(wbsId);
+      return next;
+    });
+  }, []);
 
   const timelineLabels = useMemo(() => {
     const count = Math.min(MAX_TIMELINE_LABELS, Math.ceil(totalDays / 7) + 1);
@@ -135,18 +340,34 @@ function GanttChart({ tasks, links }: { tasks: XerTask[]; links: XerSchedule['li
             </div>
           </div>
         </div>
-        {displayTasks.map((t) => (
-          <GanttRow
-            key={t.id}
-            t={t}
-            leftPct={leftPct(t.start)}
-            widthPct={widthPct(t.start, t.end)}
-          />
-        ))}
+        {visibleRows.map((row, idx) =>
+          row.type === 'wbs' ? (
+            <GanttWbsRow
+              key={`wbs-${row.wbs.id}`}
+              wbs={row.wbs}
+              level={row.level}
+              hasChildren={row.hasChildren}
+              expanded={expandedIds.has(row.wbs.id)}
+              onToggle={() => toggleWbs(row.wbs.id)}
+              spanStart={row.spanStart ?? ''}
+              spanEnd={row.spanEnd ?? ''}
+              leftPct={row.spanStart && row.spanEnd ? leftPct(row.spanStart) : 0}
+              widthPct={row.spanStart && row.spanEnd ? widthPct(row.spanStart, row.spanEnd) : 0}
+            />
+          ) : (
+            <GanttTaskRow
+              key={`task-${row.task.id}`}
+              t={row.task}
+              level={row.level}
+              leftPct={leftPct(row.task.start)}
+              widthPct={widthPct(row.task.start, row.task.end)}
+            />
+          )
+        )}
       </div>
-      {tasks.length > displayTasks.length && (
+      {visibleRows.length >= DISPLAY_LIMIT && (
         <div className="border-t border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-500">
-          Показано {displayTasks.length} из {tasks.length} работ. Загрузите файл с фильтром или уменьшите выборку.
+          Показано не более {DISPLAY_LIMIT} строк. Раскройте нужные разделы WBS.
         </div>
       )}
     </div>
@@ -221,11 +442,18 @@ export default function Home() {
 
         {schedule && (
           <section>
-            <div className="mb-2 flex items-center gap-4 text-sm text-slate-600">
+            <div className="mb-2 flex flex-wrap items-center gap-4 text-sm text-slate-600">
               <span>Работ: {schedule.tasks.length}</span>
               <span>Связей: {schedule.links.length}</span>
+              <button
+                type="button"
+                onClick={() => downloadCsv(schedule.tasks)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                Скачать для Excel (CSV)
+              </button>
             </div>
-            <GanttChart tasks={schedule.tasks} links={schedule.links} />
+            <GanttChart schedule={schedule} />
           </section>
         )}
       </main>
