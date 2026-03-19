@@ -1,0 +1,161 @@
+{
+  "name": "XER Schedule — анализ DeepSeek",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyze-schedule",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "analyze-schedule",
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.item.json.body ?? $input.item.json;\nconst tasks = Array.isArray(body.tasks) ? body.tasks : [];\nif (tasks.length === 0) {\n  return { json: { error: 'Нет данных задач для анализа.', __respondError: true } };\n}\nconst sorted = [...tasks].sort((a, b) => (a.start || '').localeCompare(b.start || ''));\nconst total = sorted.length;\nconst critical = sorted.filter(t => t.isCritical).length;\nconst done = sorted.filter(t => t.progress >= 100).length;\nconst delayedLike = sorted.filter(t => t.progress < 100 && t.isCritical).length;\nconst preview = sorted.slice(0, 250).map(t => ({\n  code: t.task_code,\n  name: t.task_name,\n  start: t.start,\n  end: t.end,\n  progress: t.progress,\n  critical: !!t.isCritical,\n  resources: t.resources ?? '',\n  wbs_id: t.wbs_id ?? ''\n}));\nconst prompt = [\n  'Ты планировщик проектов Primavera P6.',\n  'Сделай практический анализ календарного графика и предложи улучшения.',\n  'Формат ответа:',\n  '1) Короткий вывод (2-4 пункта).',\n  '2) Риски по критическому пути (до 5 пунктов).',\n  '3) Конкретные предложения по улучшению (до 10 пунктов) с приоритетом High/Medium/Low.',\n  '4) Быстрые действия на 7 дней (чеклист).',\n  '',\n  `Статистика: tasks=${total}, critical=${critical}, completed=${done}, critical_incomplete=${delayedLike}.`,\n  'Данные задач (усеченная выборка):',\n  JSON.stringify(preview)\n].join('\\n');\nreturn { json: { prompt } };"
+      },
+      "id": "code-build-prompt",
+      "name": "Собрать промпт",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-error",
+              "leftValue": "={{ $json.__respondError }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-error",
+      "name": "Есть ошибка?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [580, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.deepseek.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"deepseek-chat\",\n  \"temperature\": 0.2,\n  \"messages\": [\n    { \"role\": \"system\", \"content\": \"Ты опытный инженер-планировщик. Отвечай конкретно, на русском языке, без воды.\" },\n    { \"role\": \"user\", \"content\": $json.prompt }\n  ]\n}"
+      },
+      "id": "http-deepseek",
+      "name": "DeepSeek API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [800, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "DEEPSEEK_HEADER",
+          "name": "DeepSeek API Key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\nconst choices = item.choices;\nif (!Array.isArray(choices) || choices.length === 0) {\n  return { json: { error: item.error || 'DeepSeek вернул пустой ответ.' } }; }\nconst content = choices[0].message?.content?.trim();\nif (!content) {\n  return { json: { error: 'DeepSeek вернул пустой ответ.' } }; }\nreturn { json: { analysis: content } };"
+      },
+      "id": "code-extract",
+      "name": "Извлечь анализ",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1020, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.analysis !== undefined ? { analysis: $json.analysis } : { error: $json.error || \"Ошибка анализа\" } }}",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Ответить в Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1240, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { error: $json.error || 'Ошибка' } }}",
+        "options": {}
+      },
+      "id": "respond-error",
+      "name": "Ответить ошибка",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [580, 480]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Собрать промпт", "type": "main", "index": 0 }]
+      ]
+    },
+    "Собрать промпт": {
+      "main": [
+        [{ "node": "Есть ошибка?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Есть ошибка?": {
+      "main": [
+        [{ "node": "Ответить ошибка", "type": "main", "index": 0 }],
+        [{ "node": "DeepSeek API", "type": "main", "index": 0 }]
+      ]
+    },
+    "DeepSeek API": {
+      "main": [
+        [{ "node": "Извлечь анализ", "type": "main", "index": 0 }]
+      ]
+    },
+    "Извлечь анализ": {
+      "main": [
+        [{ "node": "Ответить в Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {},
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

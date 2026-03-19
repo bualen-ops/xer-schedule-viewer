@@ -467,6 +467,7 @@ export default function Home() {
     try {
       const tasksToSend = schedule.tasks.slice(0, 200);
       const payload = { tasks: tasksToSend };
+      // Всегда зовем наш API, чтобы запрос делался на сервере (без CORS) и гарантированно попал в n8n.
       const response = await fetch('/api/analyze-schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

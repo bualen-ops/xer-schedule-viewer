@@ -56,6 +56,60 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Нет данных задач для анализа.' }, { status: 400 });
     }
 
+    const tasksToSend = tasks.slice(0, 200);
+
+    // Если настроен n8n, проксируем запрос туда (и возвращаем результат обратно в сайт).
+    // Так гарантируем отсутствие CORS и то, что запрос реально попадает в n8n.
+    const n8nUrl = process.env.N8N_ANALYZE_WEBHOOK_URL;
+    if (n8nUrl && typeof n8nUrl === 'string' && n8nUrl.trim() !== '') {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45000);
+      try {
+        const resp = await fetch(n8nUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tasks: tasksToSend }),
+          signal: controller.signal,
+        });
+
+        const text = await resp.text();
+        let data: { analysis?: string; error?: string };
+        try {
+          data = text ? (JSON.parse(text) as { analysis?: string; error?: string }) : {};
+        } catch {
+          return NextResponse.json(
+            { error: `n8n вернул не JSON ответ (HTTP ${resp.status}).` },
+            { status: 502 }
+          );
+        }
+
+        if (!resp.ok) {
+          return NextResponse.json(
+            { error: data.error || `n8n error (HTTP ${resp.status}).` },
+            { status: 502 }
+          );
+        }
+
+        const analysis = data.analysis;
+        if (!analysis) {
+          return NextResponse.json(
+            { error: data.error || 'n8n вернул пустой ответ.' },
+            { status: 502 }
+          );
+        }
+
+        return NextResponse.json({ analysis });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        if (message.toLowerCase().includes('aborted')) {
+          return NextResponse.json({ error: 'n8n timeout (45s).' }, { status: 504 });
+        }
+        return NextResponse.json({ error: `n8n request failed: ${message}` }, { status: 502 });
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
@@ -64,7 +118,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const prompt = buildPrompt(tasks);
+    const prompt = buildPrompt(tasksToSend);
     const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
       headers: {
