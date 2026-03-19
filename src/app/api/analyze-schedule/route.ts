@@ -86,6 +86,8 @@ export async function GET() {
   const urls = resolveN8nAnalyzeWebhookUrls();
   /** На Vercel: production = основной домен (plan.alenos.ru), preview = *.vercel.app */
   const vercelEnv = process.env.VERCEL_ENV ?? null;
+  const deepseekApiKeyConfigured = !!process.env.DEEPSEEK_API_KEY?.trim();
+  const n8nOutboundAuthConfigured = !!process.env.N8N_ANALYZE_WEBHOOK_AUTH?.trim();
 
   let hint: string;
   if (urls.length > 0) {
@@ -103,6 +105,8 @@ export async function GET() {
     vercelEnv,
     n8nWebhookConfigured: urls.length > 0,
     n8nWebhookUrlCount: urls.length,
+    deepseekApiKeyConfigured,
+    n8nOutboundAuthConfigured,
     hint,
   });
 }
