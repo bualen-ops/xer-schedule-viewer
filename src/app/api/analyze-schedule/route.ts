@@ -16,6 +16,17 @@ type AnalyzeRequest = {
   tasks?: AnalyzeTask[];
 };
 
+/** Webhook URL for n8n; server-side env is reliable on Vercel after redeploy. */
+function resolveN8nAnalyzeWebhookUrl(): string | undefined {
+  const raw =
+    (process.env.N8N_ANALYZE_WEBHOOK_URL?.trim() || '') ||
+    (process.env.NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL?.trim() || '');
+  if (!raw) return undefined;
+  const url = raw.replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(url)) return undefined;
+  return url;
+}
+
 function buildPrompt(tasks: AnalyzeTask[]): string {
   const sorted = [...tasks].sort((a, b) => a.start.localeCompare(b.start));
   const total = sorted.length;
@@ -71,19 +82,13 @@ export async function POST(req: Request) {
     const tasksToSend = tasks.slice(0, 200);
 
     // Если настроен n8n, проксируем запрос туда (и возвращаем результат обратно в сайт).
-    // В Vercel можно задать либо серверную `N8N_ANALYZE_WEBHOOK_URL`, либо (для простоты) `NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL`.
-    const n8nUrl =
-      (process.env.N8N_ANALYZE_WEBHOOK_URL && process.env.N8N_ANALYZE_WEBHOOK_URL.trim() !== ''
-        ? process.env.N8N_ANALYZE_WEBHOOK_URL
-        : undefined) ||
-      (process.env.NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL &&
-      process.env.NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL.trim() !== ''
-        ? process.env.NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL
-        : undefined);
-    if (n8nUrl && typeof n8nUrl === 'string' && n8nUrl.trim() !== '') {
+    // Предпочтительно N8N_ANALYZE_WEBHOOK_URL (читается на сервере в runtime на Vercel).
+    // NEXT_PUBLIC_* может подставляться на этапе сборки — после смены значения нужен Redeploy.
+    const n8nUrl = resolveN8nAnalyzeWebhookUrl();
+    let n8nFailure: string | undefined;
+    if (n8nUrl) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 45000);
-      let n8nFailure: string | undefined;
       try {
         const resp = await fetch(n8nUrl, {
           method: 'POST',
@@ -104,7 +109,12 @@ export async function POST(req: Request) {
 
         if (resp.ok) {
           const analysis = data.analysis;
-          if (analysis) return NextResponse.json({ analysis, source: 'n8n' });
+          if (analysis) {
+            return NextResponse.json({
+              analysis,
+              source: 'n8n',
+            });
+          }
           n8nFailure = data.error || 'n8n returned empty analysis.';
         } else {
           n8nFailure = data.error || `n8n error (HTTP ${resp.status}).`;
@@ -179,7 +189,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'DeepSeek вернул пустой ответ.' }, { status: 502 });
     }
 
-    return NextResponse.json({ analysis, source: 'deepseek' });
+    const n8nNote =
+      n8nUrl && n8nFailure
+        ? `Запрос в n8n не дал анализ: ${n8nFailure} Использован запасной вызов DeepSeek.`
+        : !n8nUrl
+          ? 'Запрос не отправлялся в n8n: не задан URL webhook на сервере. В Vercel → Settings → Environment Variables для окружения Production добавьте N8N_ANALYZE_WEBHOOK_URL (полный Production URL узла Webhook в n8n) и выполните Redeploy. Альтернатива: NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL — тоже только после Redeploy.'
+          : undefined;
+
+    return NextResponse.json({
+      analysis,
+      source: 'deepseek',
+      ...(n8nNote ? { n8nNote } : {}),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Неизвестная ошибка';
     return NextResponse.json({ error: message }, { status: 500 });

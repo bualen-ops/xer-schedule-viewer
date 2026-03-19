@@ -416,7 +416,13 @@ export default function Home() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
-  const [aiDebug, setAiDebug] = useState<{ status?: number; bodyPreview?: string; error?: string } | null>(null);
+  const [aiDebug, setAiDebug] = useState<{
+    status?: number;
+    bodyPreview?: string;
+    error?: string;
+    source?: string;
+    n8nNote?: string;
+  } | null>(null);
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -475,22 +481,35 @@ export default function Home() {
       });
       const text = await response.text();
       const bodyPreview = text.length > 600 ? text.slice(0, 600) + '…' : text;
-      setAiDebug({ status: response.status, bodyPreview });
 
-      let data: { analysis?: string; error?: string };
+      let data: { analysis?: string; error?: string; source?: string; n8nNote?: string };
       try {
-        data = text ? (JSON.parse(text) as { analysis?: string; error?: string }) : {};
+        data = text
+          ? (JSON.parse(text) as { analysis?: string; error?: string; source?: string; n8nNote?: string })
+          : {};
       } catch {
         setAiError(response.ok ? 'Неверный ответ сервера.' : `Ошибка сервера (${response.status}). Попробуйте позже.`);
-        setAiDebug((d) => (d ? { ...d, error: 'JSON parse failed' } : null));
+        setAiDebug({ status: response.status, bodyPreview, error: 'JSON parse failed' });
         return;
       }
       if (!response.ok) {
         const msg = data.error || `Ошибка анализа (${response.status}). Проверьте DEEPSEEK_API_KEY в настройках Vercel.`;
         setAiError(msg);
-        setAiDebug((d) => (d ? { ...d, error: msg } : null));
+        setAiDebug({
+          status: response.status,
+          bodyPreview,
+          error: msg,
+          source: data.source,
+          n8nNote: data.n8nNote,
+        });
         return;
       }
+      setAiDebug({
+        status: response.status,
+        bodyPreview,
+        source: data.source,
+        n8nNote: data.n8nNote,
+      });
       setAiAnalysis(data.analysis || 'Пустой ответ от ИИ.');
     } catch (err) {
       const msg =
@@ -549,6 +568,12 @@ export default function Home() {
               <summary className="cursor-pointer font-medium text-slate-600">Технические детали последнего запроса</summary>
               <div className="mt-2 space-y-1 font-mono text-slate-600">
                 {aiDebug.status != null && <p>HTTP статус: {aiDebug.status}</p>}
+                {aiDebug.source && <p>Источник ответа: {aiDebug.source}</p>}
+                {aiDebug.n8nNote && (
+                  <p className="rounded border border-amber-200 bg-amber-50 p-2 text-amber-900 whitespace-pre-wrap">
+                    {aiDebug.n8nNote}
+                  </p>
+                )}
                 {aiDebug.error && <p className="text-red-600">Ошибка: {aiDebug.error}</p>}
                 {aiDebug.bodyPreview && (
                   <p className="break-all">Ответ (начало): {aiDebug.bodyPreview}</p>

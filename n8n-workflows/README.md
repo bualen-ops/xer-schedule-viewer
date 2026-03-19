@@ -19,11 +19,12 @@
    - Сохраните workflow и нажмите **Activate**.
    - Откройте узел **Webhook** и скопируйте **Production URL** (например `https://your-n8n.com/webhook/analyze-schedule`).
 
-4. **Настройка сайта**
-   - В Vercel (или в `.env.local`): добавьте переменную окружения:
-     - **Name:** `NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL`
-     - **Value:** полный URL webhook из шага 3 (без завершающего слэша).
-   - Сделайте Redeploy. Кнопка «Анализ графика с помощью ИИ DeepSeek» будет отправлять запрос в n8n вместо встроенного API.
+4. **Настройка сайта (важно для Production)**
+   - В Vercel → **Settings → Environment Variables** для окружения **Production** задайте один из вариантов:
+     - **Предпочтительно:** `N8N_ANALYZE_WEBHOOK_URL` = полный **Production** URL webhook из шага 3 (без завершающего `/`).
+     - Либо: `NEXT_PUBLIC_N8N_ANALYZE_WEBHOOK_URL` (то же значение; после изменения обязателен **Redeploy**).
+   - Обязательно нажмите **Redeploy** после добавления или смены URL — иначе API может продолжать вызывать только DeepSeek, и в n8n не будет executions.
+   - Если анализ работает, но в n8n пусто: откройте на сайте **«Технические детали»** — там будет `Источник ответа: deepseek` и подсказка `n8nNote`, если запрос в n8n не использовался.
 
 ## Формат запроса/ответа
 
