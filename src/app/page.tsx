@@ -6,6 +6,20 @@ import { parseXer, type XerSchedule, type XerTask } from '@/lib/xerParser';
 const DISPLAY_LIMIT = 200;
 const MAX_TIMELINE_LABELS = 14;
 
+function daysBetween(start: string, end: string): number {
+  const a = new Date(start).getTime();
+  const b = new Date(end).getTime();
+  return Math.round((b - a) / (24 * 60 * 60 * 1000));
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso + 'T12:00:00').toLocaleDateString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
 function GanttRow({
   t,
   leftPct,
@@ -15,11 +29,23 @@ function GanttRow({
   leftPct: number;
   widthPct: number;
 }) {
+  const duration = daysBetween(t.start, t.end);
   return (
     <div className="flex border-b border-slate-100 py-1 text-sm hover:bg-slate-50">
+      <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 font-medium text-slate-800" title={t.task_code}>
+        {t.task_code || '—'}
+      </div>
       <div className="w-48 flex-shrink-0 border-r border-slate-100 px-2 py-1">
-        <div className="truncate font-medium text-slate-800" title={t.task_name}>{t.task_code}</div>
-        <div className="truncate text-xs text-slate-500" title={t.task_name}>{t.task_name}</div>
+        <div className="truncate text-slate-700" title={t.task_name}>{t.task_name || '—'}</div>
+      </div>
+      <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 tabular-nums">
+        {formatDate(t.start)}
+      </div>
+      <div className="w-24 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 tabular-nums">
+        {formatDate(t.end)}
+      </div>
+      <div className="w-16 flex-shrink-0 border-r border-slate-100 px-2 py-1 text-slate-600 tabular-nums" title={`${duration} дн.`}>
+        {duration} д.
       </div>
       <div className="relative flex-1 py-1 pr-4" style={{ minHeight: 28 }}>
         <div
@@ -85,9 +111,13 @@ function GanttChart({ tasks, links }: { tasks: XerTask[]; links: XerSchedule['li
 
   return (
     <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
-      <div className="min-w-[800px]">
+      <div className="min-w-[960px]">
         <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-600">
-          <div className="w-48 flex-shrink-0 border-r border-slate-200 px-3 py-2">Код / Название</div>
+          <div className="w-24 flex-shrink-0 border-r border-slate-200 px-3 py-2">Код</div>
+          <div className="w-48 flex-shrink-0 border-r border-slate-200 px-3 py-2">Название</div>
+          <div className="w-24 flex-shrink-0 border-r border-slate-200 px-3 py-2">Начало</div>
+          <div className="w-24 flex-shrink-0 border-r border-slate-200 px-3 py-2">Окончание</div>
+          <div className="w-16 flex-shrink-0 border-r border-slate-200 px-3 py-2" title="Длительность (дней)">Длит.</div>
           <div className="flex-1 py-2 pr-4">
             <div className="relative h-6">
               {timelineLabels.map((d, i) => {
