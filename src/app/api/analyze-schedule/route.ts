@@ -3,6 +3,11 @@ import { NextResponse } from 'next/server';
 /** Всегда Node + свежие env на Vercel; иначе иногда «теряется» прокси до n8n. */
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+/** Лимит выполнения на Vercel (сек). Должен быть ≥ таймаута ожидания n8n + запас на DeepSeek. На Hobby часто 10s — тогда длинный n8n не влезет. */
+export const maxDuration = 300;
+
+/** Сколько ждём ответ webhook n8n (мс). */
+const N8N_WEBHOOK_TIMEOUT_MS = 200_000;
 
 type AnalyzeTask = {
   id: string;
@@ -147,7 +152,7 @@ export async function POST(req: Request) {
 
     if (n8nUrls.length > 0) {
       // Ограничиваем время, чтобы сайт на Production не отдавал "Load failed".
-      const n8nSignal = AbortSignal.timeout(20000);
+      const n8nSignal = AbortSignal.timeout(N8N_WEBHOOK_TIMEOUT_MS);
       const payload = JSON.stringify({ tasks: tasksToSend });
       const headers = buildN8nOutboundHeaders();
 
@@ -191,7 +196,7 @@ export async function POST(req: Request) {
               (error.name === 'AbortError' || message.toLowerCase().includes('aborted'))
             ) {
               n8nTimedOut = true;
-              n8nFailure = 'n8n timeout (20s).';
+              n8nFailure = 'n8n timeout (200s).';
               break;
             }
             n8nFailure = `n8n request failed: ${message}`;
@@ -208,7 +213,7 @@ export async function POST(req: Request) {
     // чем ждать ещё и DeepSeek (это снова приведёт к "Load failed").
     if (n8nTimedOut) {
       return NextResponse.json(
-        { error: 'n8n timeout (20s).' },
+        { error: 'n8n timeout (200s).' },
         { status: 504 }
       );
     }
