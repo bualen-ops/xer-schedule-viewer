@@ -7,6 +7,61 @@ const DISPLAY_LIMIT = 500;
 /** Подписей дат не больше 8, чтобы не налезали в узкой области графика (520px) */
 const MAX_TIMELINE_LABELS = 8;
 
+/** Пресет периода для отбора работ (пересечение с [start, end]). */
+type PeriodPreset = 'all' | 'week' | 'month' | 'year';
+
+function toLocalYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Понедельник–воскресенье (локальный календарь), неделя содержит anchor. */
+function weekBoundsFromAnchor(anchor: Date): { start: string; end: string } {
+  const x = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+  const dow = x.getDay();
+  const offsetToMonday = dow === 0 ? -6 : 1 - dow;
+  x.setDate(x.getDate() + offsetToMonday);
+  const start = new Date(x);
+  const end = new Date(x);
+  end.setDate(end.getDate() + 6);
+  return { start: toLocalYmd(start), end: toLocalYmd(end) };
+}
+
+function monthBoundsFromAnchor(anchor: Date): { start: string; end: string } {
+  const start = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  const end = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+  return { start: toLocalYmd(start), end: toLocalYmd(end) };
+}
+
+function yearBoundsFromAnchor(anchor: Date): { start: string; end: string } {
+  const y = anchor.getFullYear();
+  return { start: `${y}-01-01`, end: `${y}-12-31` };
+}
+
+function getPeriodBounds(preset: PeriodPreset, anchor: Date): { start: string; end: string } | null {
+  if (preset === 'all') return null;
+  if (preset === 'week') return weekBoundsFromAnchor(anchor);
+  if (preset === 'month') return monthBoundsFromAnchor(anchor);
+  return yearBoundsFromAnchor(anchor);
+}
+
+/** Работа попадает в период, если пересекается с интервалом по датам YYYY-MM-DD. */
+function taskOverlapsPeriod(task: XerTask, start: string, end: string): boolean {
+  return task.end >= start && task.start <= end;
+}
+
+function filterTasksByPeriod(tasks: XerTask[], preset: PeriodPreset, anchor: Date): XerTask[] {
+  const bounds = getPeriodBounds(preset, anchor);
+  if (!bounds) return tasks;
+  return tasks.filter((t) => taskOverlapsPeriod(t, bounds.start, bounds.end));
+}
+
+function todayYmd(): string {
+  return toLocalYmd(new Date());
+}
+
 type GanttRowItem =
   | { type: 'wbs'; wbs: XerWbsNode; level: number; hasChildren: boolean; spanStart?: string; spanEnd?: string }
   | { type: 'task'; task: XerTask; level: number };
@@ -342,6 +397,14 @@ function GanttChart({ schedule }: { schedule: XerSchedule }) {
     });
   }, [minDate, totalDays]);
 
+  if (tasks.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center text-sm text-slate-600">
+        Нет работ для отображения в текущем наборе данных (например, пустой выбранный период).
+      </div>
+    );
+  }
+
   return (
     <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
       <div className="min-w-[1280px]">
@@ -424,6 +487,26 @@ export default function Home() {
     n8nNote?: string;
   } | null>(null);
 
+  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
+  const [periodAnchor, setPeriodAnchor] = useState<string>(() => todayYmd());
+
+  const displaySchedule = useMemo(() => {
+    if (!schedule) return null;
+    const anchor = new Date(periodAnchor + 'T12:00:00');
+    const a = Number.isNaN(anchor.getTime()) ? new Date() : anchor;
+    const filtered = filterTasksByPeriod(schedule.tasks, periodPreset, a);
+    return { ...schedule, tasks: filtered };
+  }, [schedule, periodPreset, periodAnchor]);
+
+  const periodRangeLabel = useMemo(() => {
+    if (!schedule || periodPreset === 'all') return null;
+    const anchor = new Date(periodAnchor + 'T12:00:00');
+    const a = Number.isNaN(anchor.getTime()) ? new Date() : anchor;
+    const b = getPeriodBounds(periodPreset, a);
+    if (!b) return null;
+    return `${formatDate(b.start)} — ${formatDate(b.end)}`;
+  }, [schedule, periodPreset, periodAnchor]);
+
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -461,8 +544,12 @@ export default function Home() {
   }, []);
 
   const onAnalyzeWithAi = useCallback(async () => {
-    if (!schedule || schedule.tasks.length === 0) {
-      setAiError('Сначала загрузите файл XER.');
+    if (!displaySchedule || displaySchedule.tasks.length === 0) {
+      setAiError(
+        !schedule
+          ? 'Сначала загрузите файл XER.'
+          : 'В выбранном периоде нет работ для анализа (смените период или выберите «Весь график»).'
+      );
       setAiDebug(null);
       return;
     }
@@ -472,7 +559,7 @@ export default function Home() {
     setAiDebug(null);
     try {
       // Ограничиваем размер входных данных для стабильной доставки на Production.
-      const tasksToSend = schedule.tasks.slice(0, 80);
+      const tasksToSend = displaySchedule.tasks.slice(0, 80);
       const payload = { tasks: tasksToSend };
       // Всегда зовем наш API, чтобы запрос делался на сервере (без CORS) и гарантированно попал в n8n.
       const response = await fetch('/api/analyze-schedule', {
@@ -524,7 +611,7 @@ export default function Home() {
     } finally {
       setAiLoading(false);
     }
-  }, [schedule]);
+  }, [displaySchedule]);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -599,20 +686,73 @@ export default function Home() {
           )}
         </section>
 
-        {schedule && (
+        {schedule && displaySchedule && (
           <section>
+            <div className="mb-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="mb-2 text-sm font-medium text-slate-800">Период отображения</p>
+              <div className="flex flex-wrap items-end gap-4">
+                <label className="flex flex-col gap-1 text-xs text-slate-600">
+                  <span>Интервал</span>
+                  <select
+                    value={periodPreset}
+                    onChange={(e) => setPeriodPreset(e.target.value as PeriodPreset)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+                  >
+                    <option value="all">Весь график</option>
+                    <option value="week">Неделя (пн–вс)</option>
+                    <option value="month">Месяц</option>
+                    <option value="year">Год</option>
+                  </select>
+                </label>
+                {periodPreset !== 'all' && (
+                  <label className="flex flex-col gap-1 text-xs text-slate-600">
+                    <span>Опорная дата</span>
+                    <input
+                      type="date"
+                      value={periodAnchor}
+                      onChange={(e) => setPeriodAnchor(e.target.value)}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+                    />
+                  </label>
+                )}
+              </div>
+              {periodRangeLabel && (
+                <p className="mt-2 text-xs text-slate-500">
+                  Показаны работы, пересекающие период: <strong>{periodRangeLabel}</strong>
+                </p>
+              )}
+              {periodPreset !== 'all' && displaySchedule.tasks.length === 0 && (
+                <p className="mt-2 text-sm text-amber-700">
+                  В этом периоде нет работ по датам начала/окончания. Смените дату или интервал.
+                </p>
+              )}
+            </div>
             <div className="mb-2 flex flex-wrap items-center gap-4 text-sm text-slate-600">
-              <span>Работ: {schedule.tasks.length}</span>
+              <span>
+                {periodPreset === 'all' ? (
+                  <>
+                    Работ: <strong>{displaySchedule.tasks.length}</strong>
+                  </>
+                ) : (
+                  <>
+                    В периоде: <strong>{displaySchedule.tasks.length}</strong>
+                    <span className="text-slate-500"> (всего в файле: {schedule.tasks.length})</span>
+                  </>
+                )}
+              </span>
               <span>Связей: {schedule.links.length}</span>
               <button
                 type="button"
-                onClick={() => downloadCsv(schedule.tasks)}
+                onClick={() => downloadCsv(displaySchedule.tasks)}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 shadow-sm hover:bg-slate-50"
               >
                 Скачать для Excel (CSV)
               </button>
             </div>
-            <GanttChart schedule={schedule} />
+            <GanttChart
+              key={`${periodPreset}-${periodAnchor}`}
+              schedule={displaySchedule}
+            />
           </section>
         )}
       </main>
